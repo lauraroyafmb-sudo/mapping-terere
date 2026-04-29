@@ -28,7 +28,7 @@ function App() {
   const [points, setPoints] = useState<any[]>([]);
   const [geometries, setGeometries] = useState<any[]>([]);
 
-  const [customServices, setCustomServices] = useState<any[]>([]);
+  const [customLayers, setCustomLayers] = useState<any[]>([]);
 
   React.useEffect(() => {
     localforage.getItem('mt_points').then((saved: any) => {
@@ -37,8 +37,8 @@ function App() {
     localforage.getItem('mt_geometries').then((saved: any) => {
       if (saved && Array.isArray(saved)) setGeometries(saved);
     });
-    localforage.getItem('mt_custom_services').then((saved: any) => {
-      if (saved && Array.isArray(saved)) setCustomServices(saved);
+    localforage.getItem('mt_custom_layers').then((saved: any) => {
+      if (saved && Array.isArray(saved)) setCustomLayers(saved);
     });
   }, []);
   const [editingFeature, setEditingFeature] = useState<any | null>(null);
@@ -52,7 +52,7 @@ function App() {
   const [showFires, setShowFires] = useState(false);
   const [firePoints, setFirePoints] = useState<any[]>([]);
   const [isLoadingFires, setIsLoadingFires] = useState(false);
-  const [maps, setMaps] = useState<any[]>([]);
+  
   const BASE_MAPS = [
     { id: 'voyager', name: 'Calles (Carto)', type: 'Vector', style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json' },
     { id: 'positron', name: 'Claro (Carto)', type: 'Vector', style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json' },
