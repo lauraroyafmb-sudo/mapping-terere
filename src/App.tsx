@@ -64,7 +64,7 @@ function App() {
             type: 'raster',
             tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
             tileSize: 256,
-            attribution: 'Esri, Maxar, Earthstar Geographics'
+            attribution: 'Esri, Maxar'
           }
         },
         layers: [{
@@ -73,6 +73,33 @@ function App() {
           source: 'esri-satellite',
           paint: {}
         }]
+      }
+    },
+    { id: 'hybrid', name: 'Híbrido (ESRI)', type: 'Raster', style: {
+        version: 8,
+        sources: {
+          'esri-satellite': {
+            type: 'raster',
+            tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+            tileSize: 256,
+            attribution: 'Esri'
+          },
+          'esri-reference': {
+            type: 'raster',
+            tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'],
+            tileSize: 256
+          },
+          'esri-transport': {
+            type: 'raster',
+            tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}'],
+            tileSize: 256
+          }
+        },
+        layers: [
+          { id: 'satellite', type: 'raster', source: 'esri-satellite', paint: {} },
+          { id: 'transport', type: 'raster', source: 'esri-transport', paint: {} },
+          { id: 'reference', type: 'raster', source: 'esri-reference', paint: {} }
+        ]
       }
     }
   ];
