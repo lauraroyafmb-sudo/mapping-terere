@@ -269,7 +269,9 @@ function App() {
     }
 
     const blob = new Blob([dataStr], { type: mimeType });
-    const file = new File([blob], `${exportFilename}.${extension}`, { type: mimeType });
+    const isShare = action === 'share';
+    const fileName = isShare ? `${exportFilename}_${extension}.txt` : `${exportFilename}.${extension}`;
+    const file = new File([blob], fileName, { type: mimeType });
 
     const downloadFile = () => {
       const url = URL.createObjectURL(blob);
@@ -288,7 +290,7 @@ function App() {
       setShowExportModal(false);
     };
 
-    if (action === 'share') {
+    if (isShare) {
       if (!navigator.share) {
         alert("Tu navegador no permite compartir directamente. Se descargará el archivo en su lugar.");
         downloadFile();
@@ -301,14 +303,14 @@ function App() {
         try {
           await navigator.share({
             title: exportFilename,
-            text: `Datos exportados de Mapping Terere en formato ${exportFormat.toUpperCase()}`,
+            text: `Datos exportados de Mapping Terere en formato ${exportFormat.toUpperCase()} (renombrar a .${extension})`,
             files: [file]
           });
           setShowExportModal(false);
           return; // Salir si se compartió con éxito
         } catch (error: any) {
           if (error.name !== 'AbortError') {
-            alert('Error al compartir (el sistema lo bloqueó). Se descargará el archivo en su lugar.');
+            alert(`Error al compartir: ${error.message || 'el sistema lo bloqueó'}. Se descargará el archivo en su lugar.`);
             downloadFile();
           }
           return;
