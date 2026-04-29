@@ -166,21 +166,53 @@ export const GeoService = {
     const features: any[] = [];
 
     const formatProperties = (obj: any) => {
+      let richDescription = obj.description ? `<p>${obj.description}</p>` : '';
+
+      // Añadir atributos a la descripción HTML
+      if (obj.attributes && Array.isArray(obj.attributes) && obj.attributes.length > 0) {
+        richDescription += '<h3>Atributos:</h3><ul>';
+        obj.attributes.forEach((attr: any) => {
+          if (attr.key && attr.value) {
+            richDescription += `<li><strong>${attr.key}:</strong> ${attr.value}</li>`;
+          }
+        });
+        richDescription += '</ul>';
+      }
+
+      // Añadir fotos a la descripción HTML (Base64)
+      if (obj.photos && Array.isArray(obj.photos) && obj.photos.length > 0) {
+        richDescription += '<h3>Fotos:</h3><div style="display:flex; flex-direction:column; gap:10px;">';
+        obj.photos.forEach((photo: any) => {
+          const src = typeof photo === 'string' ? photo : photo.dataUrl;
+          if (src) {
+            richDescription += `<img src="${src}" style="max-width:300px; max-height:300px;" />`;
+          }
+        });
+        richDescription += '</div>';
+      }
+
       const props: any = {
         name: obj.name || (obj.type === 'polygon' ? 'Polígono' : obj.type === 'line' ? 'Línea' : 'Punto'),
-        description: obj.description || '',
+        description: richDescription || obj.description || '',
       };
+      
       if (obj.icon) props.icon = obj.icon;
       
+      // Mantener los atributos planos para compatibilidad nativa GeoJSON
       if (obj.attributes && Array.isArray(obj.attributes)) {
         obj.attributes.forEach((attr: any) => {
           if (attr.key && attr.value) {
-            // Reemplazar espacios para evitar problemas en KML
-            const safeKey = attr.key.replace(/\s+/g, '_');
-            props[`extra_${safeKey}`] = attr.value;
+            const safeKey = attr.key.replace(/[^a-zA-Z0-9_]/g, '_');
+            props[safeKey] = attr.value;
           }
         });
       }
+      
+      // Mantener el array de fotos crudo en el GeoJSON
+      if (obj.photos && Array.isArray(obj.photos) && obj.photos.length > 0) {
+        props.photos = obj.photos.map((p: any) => typeof p === 'string' ? p : p.dataUrl);
+      }
+
       return props;
     };
 
