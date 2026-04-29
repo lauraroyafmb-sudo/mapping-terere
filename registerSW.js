@@ -1,0 +1,1 @@
+if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/mapping-terere/sw.js', { scope: '/mapping-terere/' })})}
