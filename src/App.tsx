@@ -145,8 +145,8 @@ function App() {
   }, [geometries]);
 
   React.useEffect(() => {
-    localforage.setItem('mt_custom_services', customServices).catch(console.error);
-  }, [customServices]);
+    localforage.setItem('mt_custom_layers', customLayers).catch(console.error);
+  }, [customLayers]);
 
   const handleAddCustomService = () => {
     if (!newServiceName || !newServiceUrl) return;
@@ -574,18 +574,7 @@ function App() {
               <Plus size={18} /> Añadir Servicio Web (XYZ)
             </button>
 
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '1rem' }}>Mapas Importados</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {maps.map(map => (
-                <div key={map.id} className="coords-box" style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <p style={{ fontWeight: 600 }}>{map.name}</p>
-                    <p style={{ fontSize: '0.75rem', opacity: 0.7 }}>{map.size}</p>
-                  </div>
-                  <button className="btn btn-secondary" style={{ width: 'auto', padding: '0.5rem 1rem' }}>Abrir</button>
-                </div>
-              ))}
-            </div>
+
           </div>
         </div>
       )}
