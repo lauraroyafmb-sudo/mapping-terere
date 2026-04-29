@@ -18,18 +18,22 @@ import {
   X
 } from 'lucide-react';
 import tokml from 'tokml';
+import localforage from 'localforage';
 import './index.css';
 
 function App() {
   const [activeTab, setActiveTab] = useState('mapa');
-  const [points, setPoints] = useState<any[]>(() => {
-    const saved = localStorage.getItem('mt_points');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [geometries, setGeometries] = useState<any[]>(() => {
-    const saved = localStorage.getItem('mt_geometries');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [points, setPoints] = useState<any[]>([]);
+  const [geometries, setGeometries] = useState<any[]>([]);
+
+  React.useEffect(() => {
+    localforage.getItem('mt_points').then((saved: any) => {
+      if (saved && Array.isArray(saved)) setPoints(saved);
+    });
+    localforage.getItem('mt_geometries').then((saved: any) => {
+      if (saved && Array.isArray(saved)) setGeometries(saved);
+    });
+  }, []);
   const [editingFeature, setEditingFeature] = useState<any | null>(null);
   const [showMaps, setShowMaps] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -123,13 +127,13 @@ function App() {
     }
   }, [showFires]);
 
-  // Simulación de Grabación de Track
+  // Guardar datos en localforage (IndexedDB) para evitar límite de 5MB
   React.useEffect(() => {
-    localStorage.setItem('mt_points', JSON.stringify(points));
+    localforage.setItem('mt_points', points).catch(console.error);
   }, [points]);
 
   React.useEffect(() => {
-    localStorage.setItem('mt_geometries', JSON.stringify(geometries));
+    localforage.setItem('mt_geometries', geometries).catch(console.error);
   }, [geometries]);
 
   React.useEffect(() => {
