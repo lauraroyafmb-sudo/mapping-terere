@@ -15,7 +15,9 @@ import {
   Flame,
   Check,
   Download,
-  X
+  X,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import tokml from 'tokml';
 import localforage from 'localforage';
@@ -77,7 +79,6 @@ function App() {
   const [activeMapStyle, setActiveMapStyle] = useState<any>(BASE_MAPS[2].style);
   const [centerTo, setCenterTo] = useState<{lat: number, lon: number, timestamp: number} | null>(null);
   const [isLocating, setIsLocating] = useState(false);
-  const [importedTiff, setImportedTiff] = useState<{ url: string, coordinates: number[][] } | null>(null);
 
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFilename, setExportFilename] = useState('mis_datos_terere');
@@ -149,23 +150,13 @@ function App() {
 
   const handleAddCustomService = () => {
     if (!newServiceName || !newServiceUrl) return;
-    const style = {
-      version: 8,
-      sources: {
-        'custom-xyz': {
-          type: 'raster',
-          tiles: [newServiceUrl],
-          tileSize: 256
-        }
-      },
-      layers: [{
-        id: 'custom-xyz-layer',
-        type: 'raster',
-        source: 'custom-xyz',
-        paint: {}
-      }]
-    };
-    setCustomServices([...customServices, { id: Date.now(), name: newServiceName, type: 'XYZ Tile', style }]);
+    setCustomLayers(prev => [...prev, { 
+      id: Date.now(), 
+      name: newServiceName, 
+      type: 'xyz', 
+      url: newServiceUrl, 
+      visible: true 
+    }]);
     setShowServiceModal(false);
     setNewServiceName('');
     setNewServiceUrl('');
@@ -266,13 +257,14 @@ function App() {
       if (isRaster) {
         try {
           const result = await GeoService.parseGeoTIFF(file);
-          const newMap = {
+          setCustomLayers(prev => [...prev, {
             id: Date.now(),
             name: file.name.split('.')[0],
-            size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`
-          };
-          setMaps([...maps, newMap]);
-          setImportedTiff({ url: result.dataUrl, coordinates: result.coordinates as any });
+            type: 'tiff',
+            url: result.dataUrl,
+            coordinates: result.coordinates as any,
+            visible: true
+          }]);
           setCenterTo({ ...result.center, timestamp: Date.now() });
         } catch (error: any) {
           if (error.message === "PROJECTION_ERROR") {
@@ -471,7 +463,7 @@ function App() {
         drawMode={drawMode}
         centerTo={centerTo}
         mapStyle={activeMapStyle}
-        importedTiff={importedTiff}
+        customLayers={customLayers}
         onMapClick={handleMapClick}
         onEditFeature={setEditingFeature}
       />
@@ -535,31 +527,41 @@ function App() {
                   <p style={{ fontSize: '0.75rem', opacity: 0.8 }}>{map.type}</p>
                 </div>
               ))}
-              {customServices.map(service => (
+              {customLayers.map(layer => (
                 <div 
-                  key={service.id} 
+                  key={layer.id} 
                   className="coords-box"
                   style={{ 
-                    position: 'relative',
-                    cursor: 'pointer', 
-                    border: activeMapStyle === service.style ? '2px solid var(--primary)' : '2px solid transparent',
-                    background: activeMapStyle === service.style ? 'var(--primary-light)' : 'var(--surface-low)',
-                    color: activeMapStyle === service.style ? 'var(--primary-dark)' : 'inherit'
+                    flexDirection: 'row', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center',
+                    background: 'var(--surface-low)'
                   }}
-                  onClick={() => setActiveMapStyle(service.style)}
                 >
-                  <p style={{ fontWeight: 600 }}>{service.name}</p>
-                  <p style={{ fontSize: '0.75rem', opacity: 0.8 }}>{service.type}</p>
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setCustomServices(customServices.filter(s => s.id !== service.id));
-                      if (activeMapStyle === service.style) setActiveMapStyle(BASE_MAPS[2].style);
-                    }}
-                    style={{ position: 'absolute', top: '0.25rem', right: '0.25rem', background: 'none', border: 'none', color: 'var(--error)', padding: '0.25rem' }}
-                  >
-                    <X size={16} />
-                  </button>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontWeight: 600 }}>{layer.name}</p>
+                    <p style={{ fontSize: '0.75rem', opacity: 0.8 }}>{layer.type === 'xyz' ? 'Servicio Web XYZ' : 'GeoTIFF'}</p>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCustomLayers(customLayers.map(l => l.id === layer.id ? { ...l, visible: !l.visible } : l));
+                      }}
+                      style={{ background: 'none', border: 'none', color: layer.visible ? 'var(--primary)' : 'var(--on-surface-variant)', cursor: 'pointer', padding: '0.25rem' }}
+                    >
+                      {layer.visible ? <Eye size={20} /> : <EyeOff size={20} />}
+                    </button>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCustomLayers(customLayers.filter(s => s.id !== layer.id));
+                      }}
+                      style={{ background: 'none', border: 'none', color: 'var(--error)', cursor: 'pointer', padding: '0.25rem' }}
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

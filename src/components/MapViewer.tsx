@@ -18,7 +18,7 @@ interface MapViewerProps {
   drawMode?: 'none' | 'line' | 'polygon';
   centerTo?: { lat: number, lon: number, timestamp: number } | null;
   mapStyle?: string | object;
-  importedTiff?: { url: string, coordinates: number[][] } | null;
+  customLayers?: any[];
 }
 
 const MapViewer: React.FC<MapViewerProps> = ({ 
@@ -33,7 +33,7 @@ const MapViewer: React.FC<MapViewerProps> = ({
   drawMode = 'none',
   centerTo = null,
   mapStyle = 'https://demotiles.maplibre.org/style.json',
-  importedTiff = null
+  customLayers = []
 }) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -324,41 +324,67 @@ const MapViewer: React.FC<MapViewerProps> = ({
   }, [track, geometries, currentDrawing, drawMode, firePoints, showFires, isReady, styleLoadedTs]);
 
   useEffect(() => {
-    if (!map.current || !isReady || !importedTiff) return;
+    if (!map.current || !isReady) return;
     const m = map.current;
-    
-    if (!m.getSource('imported-tiff')) {
-      m.addSource('imported-tiff', {
-        type: 'image',
-        url: importedTiff.url,
-        coordinates: importedTiff.coordinates as any
+
+    const activeLayerIds = new Set<string>();
+
+    customLayers.filter(l => l.visible).forEach(layer => {
+      const sourceId = `custom-source-${layer.id}`;
+      const layerId = `custom-layer-${layer.id}`;
+      activeLayerIds.add(sourceId);
+
+      if (!m.getSource(sourceId)) {
+        if (layer.type === 'xyz') {
+          m.addSource(sourceId, {
+            type: 'raster',
+            tiles: [layer.url],
+            tileSize: 256
+          });
+        } else if (layer.type === 'tiff') {
+          m.addSource(sourceId, {
+            type: 'image',
+            url: layer.url,
+            coordinates: layer.coordinates
+          });
+        }
+
+        const addParams: any = {
+          id: layerId,
+          type: 'raster',
+          source: sourceId,
+          paint: { 'raster-opacity': layer.type === 'tiff' ? 0.85 : 1 }
+        };
+
+        if (m.getLayer('track')) {
+          m.addLayer(addParams, 'track');
+        } else {
+          m.addLayer(addParams);
+        }
+      } else if (layer.type === 'tiff') {
+        const source = m.getSource(sourceId) as maplibregl.ImageSource;
+        if (source) {
+          source.updateImage({
+            url: layer.url,
+            coordinates: layer.coordinates
+          });
+        }
+      }
+    });
+
+    const style = m.getStyle();
+    if (style && style.layers) {
+      style.layers.forEach(l => {
+        if (l.id.startsWith('custom-layer-')) {
+          const sourceId = (l as any).source;
+          if (!activeLayerIds.has(sourceId)) {
+            if (m.getLayer(l.id)) m.removeLayer(l.id);
+            if (m.getSource(sourceId)) m.removeSource(sourceId);
+          }
+        }
       });
-      // Intentamos insertar debajo de la ruta (track) si existe
-      if (m.getLayer('track')) {
-        m.addLayer({
-          id: 'imported-tiff-layer',
-          type: 'raster',
-          source: 'imported-tiff',
-          paint: { 'raster-opacity': 0.85 }
-        }, 'track');
-      } else {
-        m.addLayer({
-          id: 'imported-tiff-layer',
-          type: 'raster',
-          source: 'imported-tiff',
-          paint: { 'raster-opacity': 0.85 }
-        });
-      }
-    } else {
-      const source = m.getSource('imported-tiff') as maplibregl.ImageSource;
-      if (source) {
-        source.updateImage({
-          url: importedTiff.url,
-          coordinates: importedTiff.coordinates as any
-        });
-      }
     }
-  }, [importedTiff, isReady, styleLoadedTs]);
+  }, [customLayers, isReady, styleLoadedTs]);
 
   useEffect(() => {
     if (!map.current || !mapStyle) return;
