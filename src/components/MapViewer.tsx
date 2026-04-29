@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { GeoService } from '../services/GeoService';
+import { getIconComponent } from '../utils/iconMap';
 
 
 interface MapViewerProps {
@@ -36,6 +38,7 @@ const MapViewer: React.FC<MapViewerProps> = ({
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
+  const roots = useRef<Root[]>([]);
   const userLocationMarker = useRef<maplibregl.Marker | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [styleLoadedTs, setStyleLoadedTs] = useState(0);
@@ -203,9 +206,31 @@ const MapViewer: React.FC<MapViewerProps> = ({
   useEffect(() => {
     if (!map.current || !isReady) return;
     markers.current.forEach(m => m.remove());
+    roots.current.forEach(r => r.unmount());
     markers.current = [];
+    roots.current = [];
+
     points.forEach(p => {
-      const marker = new maplibregl.Marker()
+      const el = document.createElement('div');
+      el.className = 'custom-marker';
+      el.style.width = '32px';
+      el.style.height = '32px';
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
+      el.style.background = 'white';
+      el.style.borderRadius = '50%';
+      el.style.border = '2px solid #3B82F6';
+      el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+      el.style.cursor = 'pointer';
+      el.style.color = '#3B82F6';
+
+      const IconComponent = getIconComponent(p.icon);
+      const root = createRoot(el);
+      root.render(<IconComponent size={20} />);
+      roots.current.push(root);
+
+      const marker = new maplibregl.Marker({ element: el })
         .setLngLat([p.lon, p.lat])
         .addTo(map.current!);
       
