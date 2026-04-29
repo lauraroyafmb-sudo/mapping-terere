@@ -1,5 +1,7 @@
 import proj4 from 'proj4';
 import * as turf from '@turf/turf';
+import { kml } from '@tmcw/togeojson';
+import JSZip from 'jszip';
 
 // ...
 
@@ -258,6 +260,109 @@ export const GeoService = {
       type: 'FeatureCollection',
       features
     };
+  },
+
+  /**
+   * Importa archivos vectoriales (GeoJSON, KML, KMZ) y los convierte al formato de la app
+   */
+  async importVectorFile(file: File) {
+    const ext = file.name.toLowerCase().split('.').pop();
+    let geojson: any = null;
+
+    if (ext === 'json' || ext === 'geojson') {
+      const text = await file.text();
+      geojson = JSON.parse(text);
+    } 
+    else if (ext === 'kml') {
+      const text = await file.text();
+      const dom = new DOMParser().parseFromString(text, 'text/xml');
+      geojson = kml(dom);
+    }
+    else if (ext === 'kmz') {
+      const arrayBuffer = await file.arrayBuffer();
+      const zip = await JSZip.loadAsync(arrayBuffer);
+      const kmlFile = Object.values(zip.files).find((f: any) => f.name.toLowerCase().endsWith('.kml'));
+      if (!kmlFile) throw new Error("No se encontró ningún archivo KML dentro del KMZ");
+      const text = await kmlFile.async("text");
+      const dom = new DOMParser().parseFromString(text, 'text/xml');
+      geojson = kml(dom);
+    } else {
+      throw new Error(`Formato .${ext} no soportado para archivos vectoriales`);
+    }
+
+    const points: any[] = [];
+    const geometries: any[] = [];
+
+    const processFeature = (feature: any) => {
+      const type = feature.geometry?.type;
+      const coords = feature.geometry?.coordinates;
+      if (!type || !coords) return;
+
+      const props = feature.properties || {};
+      const id = Date.now() + Math.random();
+      
+      // Intentar extraer el texto puro de la descripción si contiene HTML
+      let cleanDesc = props.description || '';
+      if (cleanDesc && cleanDesc.includes('<')) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = cleanDesc;
+        cleanDesc = tmp.textContent || tmp.innerText || '';
+      }
+
+      const newFeature: any = {
+        id,
+        name: props.name || '',
+        description: cleanDesc,
+        attributes: []
+      };
+
+      Object.keys(props).forEach(key => {
+        if (key !== 'name' && key !== 'description' && key !== 'styleUrl' && key !== 'styleHash' && typeof props[key] !== 'object') {
+          newFeature.attributes.push({ key, value: String(props[key]) });
+        }
+      });
+
+      if (type === 'Point') {
+        newFeature.type = 'point';
+        newFeature.lon = coords[0];
+        newFeature.lat = coords[1];
+        newFeature.icon = 'default';
+        points.push(newFeature);
+      } 
+      else if (type === 'LineString') {
+        newFeature.type = 'line';
+        newFeature.coordinates = coords.map((c: any) => ({ lon: c[0], lat: c[1] }));
+        geometries.push(newFeature);
+      }
+      else if (type === 'Polygon') {
+        newFeature.type = 'polygon';
+        newFeature.coordinates = coords[0].map((c: any) => ({ lon: c[0], lat: c[1] }));
+        geometries.push(newFeature);
+      }
+      else if (type === 'MultiPoint') {
+        coords.forEach((c: any) => {
+           points.push({...newFeature, id: Date.now() + Math.random(), type: 'point', lon: c[0], lat: c[1], icon: 'default'});
+        });
+      }
+      else if (type === 'MultiLineString') {
+        coords.forEach((cArr: any) => {
+           geometries.push({...newFeature, id: Date.now() + Math.random(), type: 'line', coordinates: cArr.map((c: any) => ({ lon: c[0], lat: c[1] }))});
+        });
+      }
+      else if (type === 'MultiPolygon') {
+        coords.forEach((poly: any) => {
+           geometries.push({...newFeature, id: Date.now() + Math.random(), type: 'polygon', coordinates: poly[0].map((c: any) => ({ lon: c[0], lat: c[1] }))});
+        });
+      }
+    };
+
+    if (geojson.type === 'FeatureCollection') {
+      geojson.features.forEach(processFeature);
+    } else if (geojson.type === 'Feature') {
+      processFeature(geojson);
+    }
+
+    return { points, geometries };
   }
 };
 

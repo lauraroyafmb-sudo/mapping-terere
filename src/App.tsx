@@ -220,28 +220,55 @@ function App() {
   const handleImportMap = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (!file.name.toLowerCase().endsWith('.tif') && !file.name.toLowerCase().endsWith('.tiff')) {
-        alert('Por favor selecciona un archivo .tif o .tiff válido.');
+      const isRaster = file.name.toLowerCase().match(/\.(tif|tiff)$/);
+      const isVector = file.name.toLowerCase().match(/\.(kml|kmz|geojson|json)$/);
+      
+      if (!isRaster && !isVector) {
+        alert('Por favor selecciona un archivo .tif, .kml, .kmz o .geojson válido.');
         return;
       }
-      try {
-        const result = await GeoService.parseGeoTIFF(file);
-        const newMap = {
-          id: Date.now(),
-          name: file.name.split('.')[0],
-          size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`
-        };
-        setMaps([...maps, newMap]);
-        setImportedTiff({ url: result.dataUrl, coordinates: result.coordinates as any });
-        setCenterTo({ ...result.center, timestamp: Date.now() });
-      } catch (error: any) {
-        if (error.message === "PROJECTION_ERROR") {
-          alert('Tu mapa está usando coordenadas proyectadas (probablemente UTM) y esto hace que la aplicación falle. Por favor, abre tu archivo en QGIS, expórtalo cambiando el SRC a "WGS 84 (EPSG:4326)" y vuelve a subirlo.');
-        } else {
-          alert('Error al leer el GeoTIFF. Asegúrate de que no esté corrupto. Detalle: ' + error.message);
+
+      if (isRaster) {
+        try {
+          const result = await GeoService.parseGeoTIFF(file);
+          const newMap = {
+            id: Date.now(),
+            name: file.name.split('.')[0],
+            size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+          };
+          setMaps([...maps, newMap]);
+          setImportedTiff({ url: result.dataUrl, coordinates: result.coordinates as any });
+          setCenterTo({ ...result.center, timestamp: Date.now() });
+        } catch (error: any) {
+          if (error.message === "PROJECTION_ERROR") {
+            alert('Tu mapa está usando coordenadas proyectadas (probablemente UTM) y esto hace que la aplicación falle. Por favor, abre tu archivo en QGIS, expórtalo cambiando el SRC a "WGS 84 (EPSG:4326)" y vuelve a subirlo.');
+          } else {
+            alert('Error al leer el GeoTIFF. Asegúrate de que no esté corrupto. Detalle: ' + error.message);
+          }
+        }
+      } else if (isVector) {
+        try {
+          const result = await GeoService.importVectorFile(file);
+          if (result.points.length === 0 && result.geometries.length === 0) {
+            alert("No se encontraron geometrías válidas en el archivo.");
+            return;
+          }
+          setPoints(prev => [...prev, ...result.points]);
+          setGeometries(prev => [...prev, ...result.geometries]);
+          alert(`Se importaron ${result.points.length} puntos y ${result.geometries.length} geometrías.`);
+          
+          if (result.points.length > 0) {
+            setCenterTo({ lat: result.points[0].lat, lon: result.points[0].lon, timestamp: Date.now() });
+          } else if (result.geometries.length > 0 && result.geometries[0].coordinates.length > 0) {
+            setCenterTo({ lat: result.geometries[0].coordinates[0].lat, lon: result.geometries[0].coordinates[0].lon, timestamp: Date.now() });
+          }
+        } catch (error: any) {
+          alert('Error al importar archivo vectorial: ' + error.message);
         }
       }
     }
+    // Limpiar input para permitir importar el mismo archivo de nuevo si es necesario
+    if (e.target) e.target.value = '';
   };
 
   const [exportFormat, setExportFormat] = useState<'geojson' | 'kml'>('geojson');
@@ -527,7 +554,7 @@ function App() {
         type="file" 
         ref={fileInputRef} 
         style={{ display: 'none' }} 
-        accept=".tif,.tiff"
+        accept=".tif,.tiff,.kml,.kmz,.geojson,.json"
         onChange={handleImportMap}
       />
       <div style={{ position: 'fixed', bottom: '8rem', right: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', zIndex: 50 }}>
