@@ -250,7 +250,7 @@ function App() {
 
     if (exportFormat === 'geojson') {
       dataStr = JSON.stringify(geojson, null, 2);
-      mimeType = 'application/geo+json';
+      mimeType = 'text/plain'; // Usar text/plain para mejor compatibilidad al compartir
       extension = 'geojson';
     } else {
       try {
@@ -260,7 +260,7 @@ function App() {
           documentName: exportFilename,
           documentDescription: 'Exportado desde Mapping Terere'
         });
-        mimeType = 'application/vnd.google-earth.kml+xml';
+        mimeType = 'text/plain'; // Usar text/plain para mejor compatibilidad al compartir
         extension = 'kml';
       } catch (err) {
         alert("Error al exportar a KML");
@@ -271,30 +271,7 @@ function App() {
     const blob = new Blob([dataStr], { type: mimeType });
     const file = new File([blob], `${exportFilename}.${extension}`, { type: mimeType });
 
-    if (action === 'share') {
-      if (!navigator.share) {
-        alert("Tu navegador no permite compartir directamente. Si estás probando en tu celular mediante una IP local (ej. 192.168...), el navegador bloquea esta función por seguridad porque no es HTTPS. Se descargará el archivo en su lugar.");
-      } else if (!navigator.canShare || !navigator.canShare({ files: [file] })) {
-        alert("Tu dispositivo no permite compartir este tipo de archivos. Se descargará el archivo en su lugar.");
-      } else {
-        try {
-          await navigator.share({
-            title: exportFilename,
-            text: `Datos exportados de Mapping Terere en formato ${exportFormat.toUpperCase()}`,
-            files: [file]
-          });
-          setShowExportModal(false);
-          return; // Salir si se compartió con éxito
-        } catch (error: any) {
-          if (error.name !== 'AbortError') {
-            alert('Error al intentar compartir: ' + error.message);
-          }
-          return;
-        }
-      }
-    }
-
-    // Descarga clásica (Fallback o si eligió 'download')
+    const downloadFile = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.style.display = 'none';
@@ -309,6 +286,40 @@ function App() {
       }, 1000);
       
       setShowExportModal(false);
+    };
+
+    if (action === 'share') {
+      if (!navigator.share) {
+        alert("Tu navegador no permite compartir directamente. Se descargará el archivo en su lugar.");
+        downloadFile();
+        return;
+      } else if (!navigator.canShare || !navigator.canShare({ files: [file] })) {
+        alert("Tu dispositivo no permite compartir este tipo de archivos. Se descargará el archivo en su lugar.");
+        downloadFile();
+        return;
+      } else {
+        try {
+          await navigator.share({
+            title: exportFilename,
+            text: `Datos exportados de Mapping Terere en formato ${exportFormat.toUpperCase()}`,
+            files: [file]
+          });
+          setShowExportModal(false);
+          return; // Salir si se compartió con éxito
+        } catch (error: any) {
+          if (error.name !== 'AbortError') {
+            alert('Error al compartir (el sistema lo bloqueó). Se descargará el archivo en su lugar.');
+            downloadFile();
+          }
+          return;
+        }
+      }
+    }
+
+    // Descarga clásica si eligió 'download'
+    downloadFile();
+
+
   };
 
   return (
