@@ -26,12 +26,17 @@ function App() {
   const [points, setPoints] = useState<any[]>([]);
   const [geometries, setGeometries] = useState<any[]>([]);
 
+  const [customServices, setCustomServices] = useState<any[]>([]);
+
   React.useEffect(() => {
     localforage.getItem('mt_points').then((saved: any) => {
       if (saved && Array.isArray(saved)) setPoints(saved);
     });
     localforage.getItem('mt_geometries').then((saved: any) => {
       if (saved && Array.isArray(saved)) setGeometries(saved);
+    });
+    localforage.getItem('mt_custom_services').then((saved: any) => {
+      if (saved && Array.isArray(saved)) setCustomServices(saved);
     });
   }, []);
   const [editingFeature, setEditingFeature] = useState<any | null>(null);
@@ -79,6 +84,11 @@ function App() {
 
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFilename, setExportFilename] = useState('mis_datos_terere');
+
+  const [showServiceModal, setShowServiceModal] = useState(false);
+  const [newServiceName, setNewServiceName] = useState('');
+  const [newServiceUrl, setNewServiceUrl] = useState('');
+
 
   const currentMeasurement = React.useMemo(() => {
     if (drawMode === 'none' || currentDrawing.length < 2) return null;
@@ -135,6 +145,34 @@ function App() {
   React.useEffect(() => {
     localforage.setItem('mt_geometries', geometries).catch(console.error);
   }, [geometries]);
+
+  React.useEffect(() => {
+    localforage.setItem('mt_custom_services', customServices).catch(console.error);
+  }, [customServices]);
+
+  const handleAddCustomService = () => {
+    if (!newServiceName || !newServiceUrl) return;
+    const style = {
+      version: 8,
+      sources: {
+        'custom-xyz': {
+          type: 'raster',
+          tiles: [newServiceUrl],
+          tileSize: 256
+        }
+      },
+      layers: [{
+        id: 'custom-xyz-layer',
+        type: 'raster',
+        source: 'custom-xyz',
+        paint: {}
+      }]
+    };
+    setCustomServices([...customServices, { id: Date.now(), name: newServiceName, type: 'XYZ Tile', style }]);
+    setShowServiceModal(false);
+    setNewServiceName('');
+    setNewServiceUrl('');
+  };
 
   React.useEffect(() => {
     let interval: any;
@@ -500,7 +538,42 @@ function App() {
                   <p style={{ fontSize: '0.75rem', opacity: 0.8 }}>{map.type}</p>
                 </div>
               ))}
+              {customServices.map(service => (
+                <div 
+                  key={service.id} 
+                  className="coords-box"
+                  style={{ 
+                    position: 'relative',
+                    cursor: 'pointer', 
+                    border: activeMapStyle === service.style ? '2px solid var(--primary)' : '2px solid transparent',
+                    background: activeMapStyle === service.style ? 'var(--primary-light)' : 'var(--surface-low)',
+                    color: activeMapStyle === service.style ? 'var(--primary-dark)' : 'inherit'
+                  }}
+                  onClick={() => setActiveMapStyle(service.style)}
+                >
+                  <p style={{ fontWeight: 600 }}>{service.name}</p>
+                  <p style={{ fontSize: '0.75rem', opacity: 0.8 }}>{service.type}</p>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCustomServices(customServices.filter(s => s.id !== service.id));
+                      if (activeMapStyle === service.style) setActiveMapStyle(BASE_MAPS[2].style);
+                    }}
+                    style={{ position: 'absolute', top: '0.25rem', right: '0.25rem', background: 'none', border: 'none', color: 'var(--error)', padding: '0.25rem' }}
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
             </div>
+
+            <button 
+              className="btn btn-secondary" 
+              style={{ width: '100%', marginTop: '1rem' }}
+              onClick={() => setShowServiceModal(true)}
+            >
+              <Plus size={18} /> Añadir Servicio Web (XYZ)
+            </button>
 
             <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '1rem' }}>Mapas Importados</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -649,6 +722,48 @@ function App() {
                 Guardar en Dispositivo
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Service Web Modal */}
+      {showServiceModal && (
+        <div className="modal-overlay" onClick={() => setShowServiceModal(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+            <div className="editor-header" style={{ marginBottom: '1rem' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Añadir Capa Web</h2>
+              <button className="icon-button" onClick={() => setShowServiceModal(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            <p style={{ fontSize: '0.875rem', color: 'var(--on-surface-variant)', marginBottom: '1rem' }}>
+              Usa mosaicos estándar XYZ para cargar imágenes pesadas pre-procesadas (ej: desde QGIS).
+            </p>
+            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+              <label>Nombre de la capa</label>
+              <input 
+                type="text" 
+                value={newServiceName} 
+                onChange={(e) => setNewServiceName(e.target.value)} 
+                placeholder="Ej. Mi Ortofoto XYZ"
+              />
+            </div>
+            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+              <label>URL del Servicio (formato XYZ)</label>
+              <input 
+                type="text" 
+                value={newServiceUrl} 
+                onChange={(e) => setNewServiceUrl(e.target.value)} 
+                placeholder="https://.../{z}/{x}/{y}.png"
+              />
+            </div>
+            <button 
+              className="btn btn-primary" 
+              onClick={handleAddCustomService}
+              disabled={!newServiceName || !newServiceUrl}
+            >
+              Guardar y Añadir
+            </button>
           </div>
         </div>
       )}
