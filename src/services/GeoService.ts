@@ -279,13 +279,17 @@ export const GeoService = {
       geojson = kml(dom);
     }
     else if (ext === 'kmz') {
-      const arrayBuffer = await file.arrayBuffer();
-      const zip = await JSZip.loadAsync(arrayBuffer);
-      const kmlFile = Object.values(zip.files).find((f: any) => f.name.toLowerCase().endsWith('.kml'));
-      if (!kmlFile) throw new Error("No se encontró ningún archivo KML dentro del KMZ");
-      const text = await kmlFile.async("text");
-      const dom = new DOMParser().parseFromString(text, 'text/xml');
-      geojson = kml(dom);
+      try {
+        const zip = await JSZip.loadAsync(file);
+        const kmlFile = Object.values(zip.files).find((f: any) => f.name.toLowerCase().endsWith('.kml'));
+        if (!kmlFile) throw new Error("No se encontró ningún archivo KML dentro del KMZ");
+        const text = await kmlFile.async("string");
+        const dom = new DOMParser().parseFromString(text, 'text/xml');
+        geojson = kml(dom);
+      } catch (e: any) {
+        if (e.message.includes("No se encontró")) throw e;
+        throw new Error("Memoria insuficiente o archivo demasiado grande. Intenta exportarlo en KML o sin fotos.");
+      }
     } else {
       throw new Error(`Formato .${ext} no soportado para archivos vectoriales`);
     }
