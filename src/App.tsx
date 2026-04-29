@@ -50,10 +50,7 @@ function App() {
   const [showFires, setShowFires] = useState(false);
   const [firePoints, setFirePoints] = useState<any[]>([]);
   const [isLoadingFires, setIsLoadingFires] = useState(false);
-  const [maps, setMaps] = useState<any[]>([
-    { id: 1, name: 'Parque Nacional', size: '45 MB' },
-    { id: 2, name: 'Zona Rural', size: '12 MB' }
-  ]);
+  const [maps, setMaps] = useState<any[]>([]);
   const BASE_MAPS = [
     { id: 'voyager', name: 'Calles (Carto)', type: 'Vector', style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json' },
     { id: 'positron', name: 'Claro (Carto)', type: 'Vector', style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json' },
