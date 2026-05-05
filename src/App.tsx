@@ -82,6 +82,7 @@ function App() {
   const [showFires, setShowFires] = useState(false);
   const [firePoints, setFirePoints] = useState<any[]>([]);
   const [isLoadingFires, setIsLoadingFires] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
   
   const BASE_MAPS = [
     { id: 'voyager', name: 'Calles (Carto)', type: 'Vector', style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json' },
@@ -246,9 +247,13 @@ function App() {
 
   React.useEffect(() => {
     // Detectar si ya está instalada
-    if (window.matchMedia('(display-mode: standalone)').matches) {
+    if (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone) {
       setIsInstalled(true);
     }
+
+    // Detectar iOS
+    const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    setIsIOS(isIOSDevice);
 
     const handleBeforeInstall = (e: any) => {
       e.preventDefault();
@@ -1335,6 +1340,44 @@ function App() {
                   <Download size={20} />
                   {installStatus === 'installing' ? 'Instalando...' : 'Instalar en mi Móvil'}
                 </button>
+              )}
+
+              {!isInstalled && !deferredPrompt && isIOS && (
+                <div style={{ 
+                  padding: '1rem', 
+                  background: 'var(--surface-low)', 
+                  borderRadius: '1rem',
+                  fontSize: '0.8rem',
+                  border: '1px solid var(--primary-light)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem'
+                }}>
+                  <p style={{ fontWeight: 700, color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Download size={16} /> Instalar en iPhone/iPad
+                  </p>
+                  <p>1. Toca el botón <b>Compartir</b> (cuadrado con flecha ↑)</p>
+                  <p>2. Selecciona <b>"Añadir a la pantalla de inicio"</b></p>
+                </div>
+              )}
+
+              {!isInstalled && !deferredPrompt && !isIOS && (
+                <div style={{ 
+                  padding: '1rem', 
+                  background: 'var(--surface-low)', 
+                  borderRadius: '1rem',
+                  fontSize: '0.8rem',
+                  border: '1px solid var(--primary-light)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem'
+                }}>
+                  <p style={{ fontWeight: 700, color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Download size={16} /> ¿Cómo instalar?
+                  </p>
+                  <p>1. Toca los <b>tres puntos (⋮)</b> de Chrome</p>
+                  <p>2. Selecciona <b>"Instalar aplicación"</b></p>
+                </div>
               )}
               
               {installStatus === 'installed' && (
