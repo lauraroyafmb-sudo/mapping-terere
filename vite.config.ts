@@ -49,12 +49,6 @@ export default defineConfig({
     minify: 'terser',
     cssCodeSplit: true,
     rollupOptions: {
-      output: {
-        manualChunks: {
-          'vendor': ['react', 'react-dom', 'maplibre-gl'],
-          'geo': ['geotiff', 'proj4', '@turf/turf']
-        }
-      }
     }
   }
 })
