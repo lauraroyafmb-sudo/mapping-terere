@@ -17,11 +17,20 @@ import {
   Download,
   X,
   Eye,
-  EyeOff
+  EyeOff,
+  Folder,
+  Trash
 } from 'lucide-react';
 import tokml from 'tokml';
 import localforage from 'localforage';
 import './index.css';
+
+interface Folder {
+  id: number;
+  name: string;
+  linkedLayerId?: number;
+  visible: boolean;
+}
 
 function App() {
   const [activeTab, setActiveTab] = useState('mapa');
@@ -29,6 +38,7 @@ function App() {
   const [geometries, setGeometries] = useState<any[]>([]);
 
   const [customLayers, setCustomLayers] = useState<any[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
 
   React.useEffect(() => {
     localforage.getItem('mt_points').then((saved: any) => {
@@ -40,9 +50,13 @@ function App() {
     localforage.getItem('mt_custom_layers').then((saved: any) => {
       if (saved && Array.isArray(saved)) setCustomLayers(saved);
     });
+    localforage.getItem('mt_folders').then((saved: any) => {
+      if (saved && Array.isArray(saved)) setFolders(saved);
+    });
   }, []);
   const [editingFeature, setEditingFeature] = useState<any | null>(null);
   const [showMaps, setShowMaps] = useState(false);
+  const [showDataList, setShowDataList] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [drawMode, setDrawMode] = useState<'none' | 'line' | 'polygon'>('none');
   const [currentDrawing, setCurrentDrawing] = useState<any[]>([]);
@@ -114,6 +128,33 @@ function App() {
   const [newServiceName, setNewServiceName] = useState('');
   const [newServiceUrl, setNewServiceUrl] = useState('');
 
+  // Lógica de visibilidad en cascada
+  const visiblePoints = React.useMemo(() => {
+    return points.filter(p => {
+      if (!p.folderId) return true;
+      const folder = folders.find(f => f.id === p.folderId);
+      if (!folder || !folder.visible) return false;
+      if (folder.linkedLayerId) {
+        const layer = customLayers.find(l => l.id === folder.linkedLayerId);
+        if (layer && !layer.visible) return false;
+      }
+      return true;
+    });
+  }, [points, folders, customLayers]);
+
+  const visibleGeometries = React.useMemo(() => {
+    return geometries.filter(g => {
+      if (!g.folderId) return true;
+      const folder = folders.find(f => f.id === g.folderId);
+      if (!folder || !folder.visible) return false;
+      if (folder.linkedLayerId) {
+        const layer = customLayers.find(l => l.id === folder.linkedLayerId);
+        if (layer && !layer.visible) return false;
+      }
+      return true;
+    });
+  }, [geometries, folders, customLayers]);
+
 
   const currentMeasurement = React.useMemo(() => {
     if (drawMode === 'none' || currentDrawing.length < 2) return null;
@@ -174,6 +215,10 @@ function App() {
   React.useEffect(() => {
     localforage.setItem('mt_custom_layers', customLayers).catch(console.error);
   }, [customLayers]);
+
+  React.useEffect(() => {
+    localforage.setItem('mt_folders', folders).catch(console.error);
+  }, [folders]);
 
   const handleAddCustomService = () => {
     if (!newServiceName || !newServiceUrl) return;
@@ -245,20 +290,35 @@ function App() {
     setCurrentDrawing([]);
   };
 
-  const handleSaveFeature = (data: any) => {
+  const handleSaveFeature = (data: any, newFolder?: { name: string, linkedLayerId?: number }) => {
+    let targetFolderId = data.folderId;
+
+    if (newFolder) {
+      const folder: Folder = {
+        id: Date.now(),
+        name: newFolder.name,
+        linkedLayerId: newFolder.linkedLayerId,
+        visible: true
+      };
+      setFolders(prev => [...prev, folder]);
+      targetFolderId = folder.id;
+    }
+
+    const featureWithFolder = { ...data, folderId: targetFolderId };
+
     if (data.type === 'point') {
       const exists = points.find(p => p.id === data.id);
       if (exists) {
-        setPoints(points.map(p => p.id === data.id ? data : p));
+        setPoints(points.map(p => p.id === data.id ? featureWithFolder : p));
       } else {
-        setPoints([...points, data]);
+        setPoints([...points, featureWithFolder]);
       }
     } else {
       const exists = geometries.find(g => g.id === data.id);
       if (exists) {
-        setGeometries(geometries.map(g => g.id === data.id ? data : g));
+        setGeometries(geometries.map(g => g.id === data.id ? featureWithFolder : g));
       } else {
-        setGeometries([...geometries, data]);
+        setGeometries([...geometries, featureWithFolder]);
       }
     }
     setEditingFeature(null);
@@ -481,11 +541,11 @@ function App() {
 
       {/* Visor de Mapa */}
       <MapViewer 
-        points={points}
+        points={visiblePoints}
         firePoints={firePoints}
         showFires={showFires}
         track={currentTrack}
-        geometries={geometries}
+        geometries={visibleGeometries}
         currentDrawing={currentDrawing}
         drawMode={drawMode}
         centerTo={centerTo}
@@ -525,9 +585,23 @@ function App() {
           <button 
             className="btn btn-primary" 
             style={{ background: 'var(--error)' }}
-            onClick={() => setIsRecording(false)}
+            onClick={() => {
+              const trackData = {
+                id: Date.now(),
+                type: 'line',
+                coordinates: [...currentTrack],
+                name: `Track ${new Date().toLocaleTimeString()}`,
+                description: `Grabado el ${new Date().toLocaleDateString()}`,
+                attributes: [
+                  { key: 'Distancia', value: `${trackStats.distance.toFixed(2)} km` },
+                  { key: 'Tiempo', value: `${Math.floor(trackStats.time / 60)}:${(trackStats.time % 60).toString().padStart(2, '0')}` }
+                ]
+              };
+              setEditingFeature(trackData);
+              setIsRecording(false);
+            }}
           >
-            Detener Grabación
+            Detener y Guardar
           </button>
         </div>
       )}
@@ -535,8 +609,8 @@ function App() {
       {/* Panel de Mis Mapas y Capas Base */}
       {showMaps && (
         <div className="modal-overlay" onClick={() => setShowMaps(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Mapas Base</h2>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxHeight: '80vh', overflowY: 'auto' }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--primary-dark)' }}>Mapas Base y Capas</h2>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               {BASE_MAPS.map(map => (
                 <div 
@@ -545,7 +619,7 @@ function App() {
                   style={{ 
                     cursor: 'pointer', 
                     border: activeMapStyle === map.style ? '2px solid var(--primary)' : '2px solid transparent',
-                    background: activeMapStyle === map.style ? 'var(--primary-light)' : 'var(--surface-low)',
+                    background: activeMapStyle === map.style ? 'rgba(34, 197, 94, 0.1)' : 'var(--surface-low)',
                     color: activeMapStyle === map.style ? 'var(--primary-dark)' : 'inherit'
                   }}
                   onClick={() => setActiveMapStyle(map.style)}
@@ -554,6 +628,11 @@ function App() {
                   <p style={{ fontSize: '0.75rem', opacity: 0.8 }}>{map.type}</p>
                 </div>
               ))}
+            </div>
+
+            <h3 style={{ fontSize: '1rem', marginTop: '1rem', fontWeight: 700 }}>Mis Mapas Importados</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {customLayers.length === 0 && <p style={{ fontSize: '0.85rem', opacity: 0.6 }}>No hay mapas importados.</p>}
               {customLayers.map(layer => (
                 <div 
                   key={layer.id} 
@@ -575,18 +654,20 @@ function App() {
                         e.stopPropagation();
                         setCustomLayers(customLayers.map(l => l.id === layer.id ? { ...l, visible: !l.visible } : l));
                       }}
-                      style={{ background: 'none', border: 'none', color: layer.visible ? 'var(--primary)' : 'var(--on-surface-variant)', cursor: 'pointer', padding: '0.25rem' }}
+                      style={{ background: 'none', border: 'none', color: layer.visible ? 'var(--primary)' : 'var(--on-surface-variant)', cursor: 'pointer', padding: '0.5rem' }}
                     >
                       {layer.visible ? <Eye size={20} /> : <EyeOff size={20} />}
                     </button>
                     <button 
                       onClick={(e) => {
                         e.stopPropagation();
-                        setCustomLayers(customLayers.filter(s => s.id !== layer.id));
+                        if (confirm('¿Eliminar este mapa? Los datos dibujados sobre él NO se borrarán.')) {
+                          setCustomLayers(customLayers.filter(s => s.id !== layer.id));
+                        }
                       }}
-                      style={{ background: 'none', border: 'none', color: 'var(--error)', cursor: 'pointer', padding: '0.25rem' }}
+                      style={{ background: 'none', border: 'none', color: 'var(--error)', cursor: 'pointer', padding: '0.5rem' }}
                     >
-                      <X size={20} />
+                      <Trash size={20} />
                     </button>
                   </div>
                 </div>
@@ -594,23 +675,115 @@ function App() {
             </div>
 
             <button 
-              className="btn btn-secondary" 
+              className="btn btn-primary" 
               style={{ width: '100%', marginTop: '1rem' }}
               onClick={() => setShowServiceModal(true)}
             >
               <Plus size={18} /> Añadir Servicio Web (XYZ)
             </button>
+          </div>
+        </div>
+      )}
 
+      {/* Panel de Mis Datos (Carpetas y Listas) */}
+      {showDataList && (
+        <div className="modal-overlay" onClick={() => setShowDataList(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxHeight: '85vh', overflowY: 'auto' }}>
+            <div className="editor-header" style={{ padding: '0 0 1rem 0' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Mis Datos</h2>
+              <button className="icon-button" onClick={() => setShowDataList(false)}>
+                <X size={20} />
+              </button>
+            </div>
 
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Carpeta General */}
+              <div className="folder-container glass" style={{ borderRadius: '1rem', overflow: 'hidden' }}>
+                <div style={{ padding: '1rem', background: 'var(--surface-low)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Folder size={20} color="var(--primary-dark)" />
+                    <span style={{ fontWeight: 700 }}>General (Sin Carpeta)</span>
+                  </div>
+                </div>
+                <div style={{ padding: '0.5rem' }}>
+                  {points.filter(p => !p.folderId).map(p => (
+                    <div key={p.id} className="layer-item" onClick={() => { setEditingFeature(p); setShowDataList(false); }}>
+                      <MapPin size={16} /> <span style={{ flex: 1 }}>{p.name}</span>
+                    </div>
+                  ))}
+                  {geometries.filter(g => !g.folderId).map(g => (
+                    <div key={g.id} className="layer-item" onClick={() => { setEditingFeature(g); setShowDataList(false); }}>
+                      {g.type === 'line' ? <Route size={16} /> : <Pentagon size={16} />} 
+                      <span style={{ flex: 1 }}>{g.name}</span>
+                    </div>
+                  ))}
+                  {points.filter(p => !p.folderId).length === 0 && geometries.filter(g => !g.folderId).length === 0 && (
+                    <p style={{ fontSize: '0.8rem', opacity: 0.5, padding: '0.5rem' }}>No hay elementos en esta carpeta.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Carpetas del Usuario */}
+              {folders.map(folder => (
+                <div key={folder.id} className="folder-container glass" style={{ borderRadius: '1rem', overflow: 'hidden', borderLeft: folder.visible ? '4px solid var(--primary)' : '4px solid var(--surface-highest)' }}>
+                  <div style={{ padding: '1rem', background: 'var(--surface-low)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Folder size={20} color={folder.visible ? 'var(--primary-dark)' : 'var(--on-surface-variant)'} />
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span style={{ fontWeight: 700 }}>{folder.name}</span>
+                        {folder.linkedLayerId && (
+                          <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>
+                            Vínculo: {customLayers.find(l => l.id === folder.linkedLayerId)?.name || 'Mapa eliminado'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button 
+                        onClick={() => setFolders(folders.map(f => f.id === folder.id ? { ...f, visible: !f.visible } : f))}
+                        style={{ background: 'none', border: 'none', color: folder.visible ? 'var(--primary)' : 'var(--on-surface-variant)', cursor: 'pointer' }}
+                      >
+                        {folder.visible ? <Eye size={20} /> : <EyeOff size={20} />}
+                      </button>
+                      <button 
+                        onClick={() => {
+                          if (confirm(`¿Eliminar carpeta "${folder.name}"? Los datos se moverán a General.`)) {
+                            setPoints(points.map(p => p.folderId === folder.id ? { ...p, folderId: undefined } : p));
+                            setGeometries(geometries.map(g => g.folderId === folder.id ? { ...g, folderId: undefined } : g));
+                            setFolders(folders.filter(f => f.id !== folder.id));
+                          }
+                        }}
+                        style={{ background: 'none', border: 'none', color: 'var(--error)', cursor: 'pointer' }}
+                      >
+                        <Trash size={18} />
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ padding: '0.5rem' }}>
+                    {points.filter(p => p.folderId === folder.id).map(p => (
+                      <div key={p.id} className="layer-item" onClick={() => { setEditingFeature(p); setShowDataList(false); }}>
+                        <MapPin size={16} /> <span style={{ flex: 1 }}>{p.name}</span>
+                      </div>
+                    ))}
+                    {geometries.filter(g => g.folderId === folder.id).map(g => (
+                      <div key={g.id} className="layer-item" onClick={() => { setEditingFeature(g); setShowDataList(false); }}>
+                        {g.type === 'line' ? <Route size={16} /> : <Pentagon size={16} />} 
+                        <span style={{ flex: 1 }}>{g.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
       {/* Barra de Herramientas Inferior */}
       <div className="toolbar glass">
-        <button className={`tool-button ${activeTab === 'puntos' ? 'text-primary' : ''}`} onClick={() => setActiveTab('puntos')}>
-          <MapPin />
-          <span>Puntos</span>
+        <button className={`tool-button ${showDataList ? 'text-primary' : ''}`} onClick={() => setShowDataList(!showDataList)}>
+          <Folder size={24} />
+          <span>Mis Datos</span>
         </button>
         <button 
           className={`tool-button ${drawMode === 'line' ? 'text-primary' : ''}`} 
@@ -790,6 +963,8 @@ function App() {
           onSave={handleSaveFeature}
           onDelete={handleDeleteFeature}
           onClose={() => setEditingFeature(null)}
+          folders={folders}
+          customLayers={customLayers}
         />
       )}
 

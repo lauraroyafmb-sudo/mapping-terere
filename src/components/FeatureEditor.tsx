@@ -5,9 +5,11 @@ import { ICONS } from '../utils/iconMap';
 
 interface FeatureEditorProps {
   feature: any;
-  onSave: (feature: any) => void;
+  onSave: (feature: any, newFolder?: { name: string, linkedLayerId?: number }) => void;
   onClose: () => void;
   onDelete?: (id: number) => void;
+  folders: any[];
+  customLayers: any[];
 }
 
 
@@ -22,14 +24,18 @@ const getPosition = (): Promise<{lat: number, lon: number} | null> => {
   });
 };
 
-const FeatureEditor: React.FC<FeatureEditorProps> = ({ feature, onSave, onClose, onDelete }) => {
+const FeatureEditor: React.FC<FeatureEditorProps> = ({ feature, onSave, onClose, onDelete, folders, customLayers }) => {
   const [name, setName] = useState(feature.name || '');
   const [description, setDescription] = useState(feature.description || '');
   const [icon, setIcon] = useState(feature.icon || 'default');
   const [attributes, setAttributes] = useState(feature.attributes || []);
-  const [photos, setPhotos] = useState<any[]>(() => {
+  const [photos, setPhotos] = useState<any[]>((() => {
     return (feature.photos || []).map((p: any) => typeof p === 'string' ? { dataUrl: p } : p);
-  });
+  })());
+  
+  const [folderId, setFolderId] = useState<number | 'new' | 'none'>(feature.folderId || 'none');
+  const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderLinkedMapId, setNewFolderLinkedMapId] = useState<number | 'none'>('none');
 
   const cameraInputRef = React.useRef<HTMLInputElement>(null);
   const galleryInputRef = React.useRef<HTMLInputElement>(null);
@@ -73,14 +79,20 @@ const FeatureEditor: React.FC<FeatureEditorProps> = ({ feature, onSave, onClose,
   };
 
   const handleSave = () => {
+    const newFolder = folderId === 'new' ? { 
+      name: newFolderName || 'Nueva Carpeta', 
+      linkedLayerId: newFolderLinkedMapId === 'none' ? undefined : newFolderLinkedMapId 
+    } : undefined;
+
     onSave({
       ...feature,
       name,
       description,
       icon,
       attributes,
-      photos
-    });
+      photos,
+      folderId: folderId === 'new' ? undefined : folderId === 'none' ? undefined : folderId
+    }, newFolder);
   };
 
   const getTitle = () => {
@@ -140,6 +152,53 @@ const FeatureEditor: React.FC<FeatureEditorProps> = ({ feature, onSave, onClose,
                     <IconComponent size={20} />
                   </button>
                 ))}
+              </div>
+            </div>
+          )}
+
+          <div className="form-group">
+            <label>Carpeta / Proyecto</label>
+            <select 
+              value={folderId} 
+              onChange={(e) => setFolderId(e.target.value as any)}
+              className="select-input"
+              style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)', background: 'var(--surface)', color: 'var(--text-primary)' }}
+            >
+              <option value="none">Sin Carpeta (General)</option>
+              {folders.map(f => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+              <option value="new">+ Crear Nueva Carpeta...</option>
+            </select>
+          </div>
+
+          {folderId === 'new' && (
+            <div className="new-folder-fields" style={{ padding: '1rem', borderRadius: '0.5rem', marginBottom: '1rem', background: 'rgba(52, 211, 153, 0.1)', border: '1px solid var(--primary)' }}>
+              <div className="form-group">
+                <label>Nombre de la Carpeta</label>
+                <input 
+                  type="text" 
+                  value={newFolderName} 
+                  onChange={(e) => setNewFolderName(e.target.value)} 
+                  placeholder="Ej: Proyecto Chaco"
+                />
+              </div>
+              <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                <label>Vincular a Mapa (Opcional)</label>
+                <select 
+                  value={newFolderLinkedMapId} 
+                  onChange={(e) => setNewFolderLinkedMapId(e.target.value === 'none' ? 'none' : Number(e.target.value))}
+                  className="select-input"
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)', background: 'var(--surface)', color: 'var(--text-primary)' }}
+                >
+                  <option value="none">Ninguno (Visible siempre)</option>
+                  {customLayers.map(l => (
+                    <option key={l.id} value={l.id}>{l.name} ({l.type === 'tiff' ? 'GeoTIFF' : 'XYZ'})</option>
+                  ))}
+                </select>
+                <p style={{ fontSize: '0.7rem', marginTop: '0.25rem', opacity: 0.8 }}>
+                  Si vinculas un mapa, la carpeta se ocultará automáticamente cuando apagues ese mapa.
+                </p>
               </div>
             </div>
           )}
