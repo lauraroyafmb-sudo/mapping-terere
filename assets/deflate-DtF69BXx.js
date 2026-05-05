@@ -1,0 +1,1 @@
+import{t as e}from"./pako.esm-Cfm_6xrv.js";import{t as r}from"./basedecoder-afk2-Q9r.js";var s=class extends r{decodeBlock(r){return e(new Uint8Array(r)).buffer}};export{s as default};

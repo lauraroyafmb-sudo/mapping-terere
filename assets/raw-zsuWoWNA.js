@@ -1,0 +1,1 @@
+import{t as e}from"./basedecoder-afk2-Q9r.js";var r=class extends e{decodeBlock(e){return e}};export{r as default};
