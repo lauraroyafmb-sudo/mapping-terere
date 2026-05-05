@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import MapViewer from './components/MapViewer';
 import FeatureEditor from './components/FeatureEditor';
 import { GeoService } from './services/GeoService';
@@ -19,7 +19,9 @@ import {
   Eye,
   EyeOff,
   Folder,
-  Trash
+  Trash,
+  Pause,
+  Play
 } from 'lucide-react';
 import tokml from 'tokml';
 import localforage from 'localforage';
@@ -33,12 +35,13 @@ interface Folder {
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState('mapa');
+  const [activeTab, _setActiveTab] = useState('mapa');
   const [points, setPoints] = useState<any[]>([]);
   const [geometries, setGeometries] = useState<any[]>([]);
 
   const [customLayers, setCustomLayers] = useState<any[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
+  const mapRef = useRef<any>(null);
 
   React.useEffect(() => {
     localforage.getItem('mt_points').then((saved: any) => {
@@ -53,14 +56,27 @@ function App() {
     localforage.getItem('mt_folders').then((saved: any) => {
       if (saved && Array.isArray(saved)) setFolders(saved);
     });
+    localforage.getItem('mt_active_map_style').then((saved: any) => {
+      if (saved) setActiveMapStyle(saved);
+    });
   }, []);
   const [editingFeature, setEditingFeature] = useState<any | null>(null);
   const [showMaps, setShowMaps] = useState(false);
   const [showDataList, setShowDataList] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [drawMode, setDrawMode] = useState<'none' | 'line' | 'polygon'>('none');
+  const [isPaused, setIsPaused] = useState(false);
+  const [accumulatedTime, setAccumulatedTime] = useState(0);
+  const [lastResumeTime, setLastResumeTime] = useState(0);
+  const [drawMode, setDrawMode] = useState<'none' | 'point' | 'line' | 'polygon'>('none');
   const [currentDrawing, setCurrentDrawing] = useState<any[]>([]);
   const [currentTrack, setCurrentTrack] = useState<any[]>([]);
+  const [userLocation, setUserLocation] = useState<{lat: number, lon: number, accuracy: number} | null>(null);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [activeFolderId, setActiveFolderId] = useState<number | null>(null);
+  const [showProjectSelector, setShowProjectSelector] = useState(true);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [installStatus, setInstallStatus] = useState<'idle' | 'installing' | 'installed'>('idle');
   const [trackStats, setTrackStats] = useState({ distance: 0, time: 0, speed: 0 });
   const [showLayers, setShowLayers] = useState(false);
   const [showFires, setShowFires] = useState(false);
@@ -127,6 +143,10 @@ function App() {
   const [showServiceModal, setShowServiceModal] = useState(false);
   const [newServiceName, setNewServiceName] = useState('');
   const [newServiceUrl, setNewServiceUrl] = useState('');
+
+  const [showNewFolderModal, setShowNewFolderModal] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderLinkedMapId, setNewFolderLinkedMapId] = useState<number | 'none'>('none');
 
   // Lógica de visibilidad en cascada
   const visiblePoints = React.useMemo(() => {
@@ -220,6 +240,77 @@ function App() {
     localforage.setItem('mt_folders', folders).catch(console.error);
   }, [folders]);
 
+  React.useEffect(() => {
+    localforage.setItem('mt_active_map_style', activeMapStyle).catch(console.error);
+  }, [activeMapStyle]);
+
+  React.useEffect(() => {
+    // Detectar si ya está instalada
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      setIsInstalled(true);
+    }
+
+    const handleBeforeInstall = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setIsInstalled(false);
+    };
+
+    const handleAppInstalled = () => {
+      setDeferredPrompt(null);
+      setIsInstalled(true);
+      setInstallStatus('installed');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    
+    setInstallStatus('installing');
+    deferredPrompt.prompt();
+    
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      // Instalación aceptada
+    } else {
+      setInstallStatus('idle');
+    }
+    setDeferredPrompt(null);
+  };
+
+  // Monitoreo constante de la ubicación GPS para navegación
+  React.useEffect(() => {
+    if (!navigator.geolocation) return;
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const loc = {
+          lat: position.coords.latitude,
+          lon: position.coords.longitude,
+          accuracy: position.coords.accuracy
+        };
+        setUserLocation(loc);
+        
+        // Auto-centrado si el modo seguimiento está activo
+        if (isFollowing) {
+          setCenterTo({ lat: loc.lat, lon: loc.lon, timestamp: Date.now() });
+        }
+      },
+      (error) => console.error('Error GPS Global:', error),
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [isFollowing]);
+
   const handleAddCustomService = () => {
     if (!newServiceName || !newServiceUrl) return;
     setCustomLayers(prev => [...prev, { 
@@ -235,33 +326,65 @@ function App() {
   };
 
   React.useEffect(() => {
-    let interval: any;
-    if (isRecording) {
-      interval = setInterval(() => {
-        setTrackStats(prev => ({
-          ...prev,
-          time: prev.time + 1,
-          distance: prev.distance + (Math.random() * 0.01),
-          speed: 5 + (Math.random() * 2)
-        }));
-        
-        setCurrentTrack(prev => {
-          const lastPoint = prev[prev.length - 1] || { lat: -25.3000, lon: -57.6333 };
-          return [...prev, { 
-            lat: lastPoint.lat + (Math.random() - 0.5) * 0.0001, 
-            lon: lastPoint.lon + (Math.random() - 0.5) * 0.0001 
-          }];
-        });
-      }, 1000);
+    let watchId: number | null = null;
+
+    if (isRecording && !isPaused) {
+      if (!navigator.geolocation) {
+        alert('Geolocalización no soportada');
+        setIsRecording(false);
+        return;
+      }
+
+      setLastResumeTime(Date.now());
+
+      watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          const newPoint = { 
+            lat: position.coords.latitude, 
+            lon: position.coords.longitude,
+            timestamp: position.timestamp 
+          };
+
+          setCurrentTrack(prev => {
+            if (prev.length > 0) {
+              const lastPoint = prev[prev.length - 1];
+              
+              if (position.coords.accuracy > 30) return prev;
+
+              const distStr = GeoService.calculateDistance([lastPoint, newPoint]);
+              if (!distStr) return prev;
+
+              const isMeters = distStr.includes('m');
+              const value = parseFloat(distStr.split(' ')[0]) || 0;
+              const distInKm = isMeters ? value / 1000 : value;
+
+              if (distInKm < 0.002) return prev;
+              
+              setTrackStats(s => ({
+                distance: s.distance + distInKm,
+                time: accumulatedTime + Math.floor((Date.now() - (lastResumeTime || Date.now())) / 1000),
+                speed: position.coords.speed ? position.coords.speed * 3.6 : s.speed
+              }));
+            }
+            return [...prev, newPoint];
+          });
+        },
+        (error) => console.error('GPS Error:', error),
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+    } else if (isRecording && isPaused) {
+      // Al pausar, guardamos el tiempo acumulado hasta ahora
+      setAccumulatedTime(prev => prev + Math.floor((Date.now() - lastResumeTime) / 1000));
     }
-    return () => clearInterval(interval);
-  }, [isRecording]);
+
+    return () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    };
+  }, [isRecording, isPaused]);
 
   const handleMapClick = (e: any) => {
     const { lngLat } = e;
-    if (drawMode !== 'none') {
-      setCurrentDrawing(prev => [...prev, { lat: lngLat.lat, lon: lngLat.lng }]);
-    } else {
+    if (drawMode === 'point') {
       setEditingFeature({
         id: Date.now(),
         type: 'point',
@@ -270,7 +393,26 @@ function App() {
         name: `Punto ${points.length + 1}`,
         description: '',
         icon: 'default',
-        attributes: []
+        attributes: [],
+        photos: [],
+        folderId: activeFolderId
+      });
+      setDrawMode('none');
+    } else if (drawMode !== 'none') {
+      setCurrentDrawing(prev => [...prev, { lat: lngLat.lat, lon: lngLat.lng }]);
+    } else {
+      // Por defecto, clic en el mapa también puede crear un punto o podemos dejarlo solo para los modos
+      setEditingFeature({
+        id: Date.now(),
+        type: 'point',
+        lat: lngLat.lat,
+        lon: lngLat.lng,
+        name: `Punto ${points.length + 1}`,
+        description: '',
+        icon: 'default',
+        attributes: [],
+        photos: [],
+        folderId: activeFolderId
       });
     }
   };
@@ -283,7 +425,8 @@ function App() {
         coordinates: currentDrawing,
         name: `${drawMode === 'line' ? 'Línea' : 'Polígono'} ${geometries.length + 1}`,
         description: '',
-        attributes: []
+        attributes: [],
+        folderId: activeFolderId
       });
     }
     setDrawMode('none');
@@ -328,6 +471,22 @@ function App() {
     setPoints(points.filter(p => p.id !== id));
     setGeometries(geometries.filter(g => g.id !== id));
     setEditingFeature(null);
+  };
+
+  const handleCreateFolder = () => {
+    if (!newFolderName) return;
+    const newFolder: Folder = {
+      id: Date.now(),
+      name: newFolderName,
+      linkedLayerId: newFolderLinkedMapId === 'none' ? undefined : newFolderLinkedMapId,
+      visible: true
+    };
+    setFolders(prev => [...prev, newFolder]);
+    setActiveFolderId(newFolder.id);
+    setNewFolderName('');
+    setNewFolderLinkedMapId('none');
+    setShowNewFolderModal(false);
+    setShowProjectSelector(false);
   };
 
   const handleImportMap = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -476,36 +635,79 @@ function App() {
         {drawMode !== 'none' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--primary-dark)', fontWeight: 600 }}>
             <div className="pulse" style={{ background: 'var(--primary)' }}></div>
-            MODO DIBUJO: {drawMode === 'line' ? 'LÍNEA' : 'POLÍGONO'}
+            MODO DIBUJO: {drawMode === 'line' ? 'LÍNEA' : drawMode === 'polygon' ? 'POLÍGONO' : 'PUNTO'}
+            <span style={{ fontSize: '0.75rem', fontWeight: 400, marginLeft: '0.5rem' }}>
+              {drawMode === 'point' ? 'Toca el mapa para ubicar' : 'Toca para añadir vértices'}
+            </span>
           </div>
         ) : (
           <>
             <Search size={20} className="text-on-surface-variant" />
             <input type="text" placeholder="Buscar lugares o coordenadas..." />
+            {userLocation && (
+              <div style={{ 
+                marginLeft: 'auto', 
+                fontSize: '0.7rem', 
+                background: userLocation.accuracy < 15 ? 'rgba(34, 197, 94, 0.2)' : 'rgba(234, 179, 8, 0.2)',
+                color: userLocation.accuracy < 15 ? 'var(--primary-dark)' : 'var(--warning)',
+                padding: '2px 8px',
+                borderRadius: '10px',
+                fontWeight: 700,
+                whiteSpace: 'nowrap'
+              }}>
+                ±{userLocation.accuracy.toFixed(0)}m
+              </div>
+            )}
           </>
         )}
       </div>
 
-      {/* Measurement Overlay */}
-      {currentMeasurement && (
+      {/* Measurement Overlay y Botón de Guardar Dibujo */}
+      {currentDrawing.length > 0 && drawMode !== 'none' && (
         <div style={{
           position: 'absolute',
           top: '80px',
           left: '50%',
           transform: 'translateX(-50%)',
-          backgroundColor: 'var(--surface)',
-          padding: '0.5rem 1rem',
-          borderRadius: '1rem',
-          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-          zIndex: 10,
-          fontWeight: 600,
           display: 'flex',
+          flexDirection: 'column',
           alignItems: 'center',
           gap: '0.5rem',
-          color: 'var(--text)'
+          zIndex: 100
         }}>
-          {drawMode === 'polygon' ? <Pentagon size={16} color="var(--primary)" /> : <Route size={16} color="var(--primary)" />}
-          <span>{drawMode === 'polygon' ? 'Área:' : 'Distancia:'} {currentMeasurement}</span>
+          <div className="glass" style={{
+            padding: '0.5rem 1rem',
+            borderRadius: '1rem',
+            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            color: 'var(--text)'
+          }}>
+            {drawMode === 'polygon' ? <Pentagon size={16} color="var(--primary)" /> : <Route size={16} color="var(--primary)" />}
+            <span>{drawMode === 'polygon' ? 'Área:' : 'Distancia:'} {currentMeasurement}</span>
+          </div>
+          
+          <button 
+            className="btn btn-primary" 
+            style={{ borderRadius: '2rem', padding: '0.5rem 1.5rem', boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)' }}
+            onClick={() => {
+              setEditingFeature({
+                id: Date.now(),
+                type: drawMode,
+                coordinates: [...currentDrawing],
+                name: '',
+                description: '',
+                attributes: [],
+                photos: []
+              });
+              setDrawMode('none');
+              setCurrentDrawing([]);
+            }}
+          >
+            Finalizar y Guardar
+          </button>
         </div>
       )}
 
@@ -541,26 +743,33 @@ function App() {
 
       {/* Visor de Mapa */}
       <MapViewer 
+        ref={mapRef}
         points={visiblePoints}
         firePoints={firePoints}
         showFires={showFires}
         track={currentTrack}
         geometries={visibleGeometries}
         currentDrawing={currentDrawing}
+        editingFeature={editingFeature}
         drawMode={drawMode}
         centerTo={centerTo}
         mapStyle={activeMapStyle}
         customLayers={customLayers}
         onMapClick={handleMapClick}
         onEditFeature={setEditingFeature}
+        onDrawingUpdate={setCurrentDrawing}
+        onFeatureUpdate={setEditingFeature}
+        userLocation={userLocation}
       />
 
       {/* Panel de Grabación */}
       {isRecording && (
         <div className="recording-panel">
           <div style={{ display: 'flex', alignItems: 'center' }}>
-            <span className="pulse"></span>
-            <span style={{ fontWeight: 700, color: 'var(--error)' }}>GRABANDO TRACK</span>
+            <span className={isPaused ? '' : 'pulse'} style={{ background: isPaused ? 'var(--on-surface-variant)' : 'var(--error)' }}></span>
+            <span style={{ fontWeight: 700, color: isPaused ? 'var(--on-surface-variant)' : 'var(--error)' }}>
+              {isPaused ? 'TRACK PAUSADO' : 'GRABANDO TRACK'}
+            </span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div className="stat-item">
@@ -582,27 +791,46 @@ function App() {
               <span className="stat-value">{currentTrack.length}</span>
             </div>
           </div>
-          <button 
-            className="btn btn-primary" 
-            style={{ background: 'var(--error)' }}
-            onClick={() => {
-              const trackData = {
-                id: Date.now(),
-                type: 'line',
-                coordinates: [...currentTrack],
-                name: `Track ${new Date().toLocaleTimeString()}`,
-                description: `Grabado el ${new Date().toLocaleDateString()}`,
-                attributes: [
-                  { key: 'Distancia', value: `${trackStats.distance.toFixed(2)} km` },
-                  { key: 'Tiempo', value: `${Math.floor(trackStats.time / 60)}:${(trackStats.time % 60).toString().padStart(2, '0')}` }
-                ]
-              };
-              setEditingFeature(trackData);
-              setIsRecording(false);
-            }}
-          >
-            Detener y Guardar
-          </button>
+          
+          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+            <button 
+              className="btn" 
+              style={{ 
+                flex: 1, 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                gap: '0.5rem',
+                background: isPaused ? 'var(--primary)' : 'var(--surface-highest)',
+                color: isPaused ? 'white' : 'inherit'
+              }}
+              onClick={() => setIsPaused(!isPaused)}
+            >
+              {isPaused ? <Play size={20} /> : <Pause size={20} />}
+              <span>{isPaused ? 'Reanudar' : 'Pausar'}</span>
+            </button>
+            <button 
+              className="btn btn-primary" 
+              style={{ flex: 1, background: 'var(--error)' }}
+              onClick={() => {
+                const trackData = {
+                  id: Date.now(),
+                  type: 'line',
+                  coordinates: [...currentTrack],
+                  name: `Track ${new Date().toLocaleTimeString()}`,
+                  description: `Grabado el ${new Date().toLocaleDateString()}`,
+                  attributes: [
+                    { key: 'Distancia', value: `${trackStats.distance.toFixed(2)} km` },
+                    { key: 'Tiempo', value: `${Math.floor(trackStats.time / 60)}:${(trackStats.time % 60).toString().padStart(2, '0')}` }
+                  ]
+                };
+                setEditingFeature(trackData);
+                setIsRecording(false);
+              }}
+            >
+              Detener
+            </button>
+          </div>
         </div>
       )}
 
@@ -780,32 +1008,42 @@ function App() {
       )}
 
       {/* Barra de Herramientas Inferior */}
-      <div className="toolbar glass">
+      <div className="toolbar glass" style={{ gap: '0.5rem', padding: '0.75rem 1rem' }}>
         <button className={`tool-button ${showDataList ? 'text-primary' : ''}`} onClick={() => setShowDataList(!showDataList)}>
-          <Folder size={24} />
-          <span>Mis Datos</span>
+          <Folder size={22} />
+          <span>Datos</span>
+        </button>
+        <button className={`tool-button ${drawMode === 'point' ? 'text-primary' : ''}`} onClick={() => setDrawMode(drawMode === 'point' ? 'none' : 'point')}>
+          <MapPin size={22} />
+          <span>Puntos</span>
         </button>
         <button 
           className={`tool-button ${drawMode === 'line' ? 'text-primary' : ''}`} 
           onClick={() => setDrawMode(drawMode === 'line' ? 'none' : 'line')}
         >
-          <Route />
+          <Route size={22} />
           <span>Líneas</span>
         </button>
         <button 
           className={`tool-button ${drawMode === 'polygon' ? 'text-primary' : ''}`} 
           onClick={() => setDrawMode(drawMode === 'polygon' ? 'none' : 'polygon')}
         >
-          <Pentagon />
+          <Pentagon size={22} />
           <span>Polígonos</span>
         </button>
         <button className={`tool-button ${isRecording ? 'text-error' : activeTab === 'track' ? 'text-primary' : ''}`} onClick={() => {
-          setActiveTab('track');
-          setIsRecording(true);
-          setTrackStats({ distance: 0, time: 0, speed: 0 });
-          setCurrentTrack([]);
+          if (isRecording) {
+            // Ya se maneja en el panel de grabación
+          } else {
+            setIsRecording(true);
+            setIsPaused(false);
+            setAccumulatedTime(0);
+            setLastResumeTime(Date.now());
+            setTrackStats({ distance: 0, time: 0, speed: 0 });
+            setCurrentTrack([]);
+          }
         }}>
-          <CircleDot color={isRecording ? 'var(--error)' : 'currentColor'} />
+          <CircleDot size={22} color={isRecording ? 'var(--error)' : 'currentColor'} />
           <span>{isRecording ? 'Grabando' : 'Grabar'}</span>
         </button>
       </div>
@@ -830,11 +1068,18 @@ function App() {
 
         <button 
           className="fab" 
-          style={{ width: '48px', height: '48px', opacity: isLocating ? 0.7 : 1, position: 'static' }}
-          onClick={handleCenterLocation}
-          title="Centrar en mi ubicación GPS"
+          style={{ width: '48px', height: '48px', opacity: isLocating ? 0.7 : 1, position: 'static', color: isFollowing ? 'white' : 'inherit', background: isFollowing ? 'var(--primary)' : 'var(--surface)' }}
+          onClick={() => {
+            if (isFollowing) {
+              setIsFollowing(false);
+            } else {
+              handleCenterLocation();
+              setIsFollowing(true);
+            }
+          }}
+          title={isFollowing ? "Desactivar seguimiento" : "Activar seguimiento"}
         >
-          <Navigation size={24} className={isLocating ? 'pulse' : ''} />
+          <Navigation size={24} className={isFollowing ? '' : isLocating ? 'pulse' : ''} />
         </button>
 
         <button 
@@ -977,6 +1222,207 @@ function App() {
         >
           Finalizar {drawMode === 'line' ? 'Línea' : 'Polígono'}
         </button>
+      )}
+      {/* Selector de Proyecto Inicial */}
+      {showProjectSelector && (
+        <div className="modal-overlay" style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)' }}>
+          <div className="modal-content" style={{ maxWidth: '450px', background: 'var(--surface)', padding: '2rem' }}>
+            <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+              <img 
+                src="./logo-terere.png" 
+                alt="Mapping Terere Logo" 
+                style={{ 
+                  width: '140px', 
+                  height: '140px', 
+                  borderRadius: '24px', 
+                  marginBottom: '1rem', 
+                  boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
+                  border: '4px solid white'
+                }} 
+              />
+              <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--primary-dark)', marginBottom: '0.5rem' }}>Mapping Terere</h1>
+              <p style={{ opacity: 0.7 }}>Gestión de Proyectos GIS</p>
+            </div>
+
+            <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '1rem' }}>Seleccionar Proyecto</h2>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '40vh', overflowY: 'auto', marginBottom: '1.5rem', paddingRight: '0.5rem' }}>
+              <div 
+                className="coords-box" 
+                style={{ cursor: 'pointer', border: activeFolderId === null ? '2px solid var(--primary)' : '1px solid var(--surface-highest)' }}
+                onClick={() => {
+                  setActiveFolderId(null);
+                  setShowProjectSelector(false);
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <Folder size={24} color="var(--primary)" />
+                  <div>
+                    <p style={{ fontWeight: 700 }}>General</p>
+                    <p style={{ fontSize: '0.75rem', opacity: 0.6 }}>Todos los datos sin categorizar</p>
+                  </div>
+                </div>
+              </div>
+
+              {folders.map(folder => (
+                <div 
+                  key={folder.id} 
+                  className="coords-box" 
+                  style={{ cursor: 'pointer', border: activeFolderId === folder.id ? '2px solid var(--primary)' : '1px solid var(--surface-highest)' }}
+                  onClick={() => {
+                    setActiveFolderId(folder.id);
+                    setShowProjectSelector(false);
+                    
+                    // 1. Activar la capa vinculada si existe
+                    if (folder.linkedLayerId) {
+                      setCustomLayers(layers => layers.map(l => l.id === folder.linkedLayerId ? { ...l, visible: true } : l));
+                    }
+
+                    // 2. Centrar el mapa
+                    // Prioridad A: Capa vinculada
+                    const linkedLayer = customLayers.find(l => l.id === folder.linkedLayerId);
+                    if (linkedLayer && linkedLayer.center) {
+                      setCenterTo({ lat: linkedLayer.center.lat, lon: linkedLayer.center.lon, timestamp: Date.now() });
+                    } 
+                    // Prioridad B: Puntos o geometrías del proyecto
+                    else {
+                      const folderPoints = points.filter(p => p.folderId === folder.id);
+                      const folderGeoms = geometries.filter(g => g.folderId === folder.id);
+                      
+                      if (folderPoints.length > 0) {
+                        setCenterTo({ lat: folderPoints[0].lat, lon: folderPoints[0].lon, timestamp: Date.now() });
+                      } else if (folderGeoms.length > 0 && folderGeoms[0].coordinates?.length > 0) {
+                        setCenterTo({ lat: folderGeoms[0].coordinates[0].lat, lon: folderGeoms[0].coordinates[0].lon, timestamp: Date.now() });
+                      }
+                    }
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <Folder size={24} color="var(--primary)" />
+                    <div>
+                      <p style={{ fontWeight: 700 }}>{folder.name}</p>
+                      {folder.linkedLayerId && (
+                        <p style={{ fontSize: '0.75rem', opacity: 0.6 }}>
+                          Vínculo: {customLayers.find(l => l.id === folder.linkedLayerId)?.name || 'Mapa'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--surface-highest)', paddingTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {!isInstalled && deferredPrompt && (
+                <button 
+                  className="btn" 
+                  style={{ 
+                    width: '100%', 
+                    padding: '1rem', 
+                    borderRadius: '1rem', 
+                    background: installStatus === 'installing' ? 'var(--surface-highest)' : 'var(--primary-dark)',
+                    color: 'white',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)'
+                  }}
+                  onClick={handleInstallClick}
+                  disabled={installStatus === 'installing'}
+                >
+                  <Download size={20} />
+                  {installStatus === 'installing' ? 'Instalando...' : 'Instalar en mi Móvil'}
+                </button>
+              )}
+              
+              {installStatus === 'installed' && (
+                <div style={{ 
+                  padding: '0.75rem', 
+                  background: 'rgba(34, 197, 94, 0.1)', 
+                  color: 'var(--primary-dark)', 
+                  borderRadius: '0.75rem',
+                  fontSize: '0.85rem',
+                  textAlign: 'center',
+                  fontWeight: 600
+                }}>
+                  ✅ ¡Instalación completada! Abre Mapping Terere desde tu menú.
+                </div>
+              )}
+
+              <button 
+                className="btn btn-primary" 
+                style={{ width: '100%', padding: '1rem', borderRadius: '1rem' }}
+                onClick={() => setShowNewFolderModal(true)}
+              >
+                <Plus size={20} />
+                Nuevo Proyecto
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Nuevo Proyecto */}
+      {showNewFolderModal && (
+        <div className="modal-overlay" style={{ zIndex: 2000 }}>
+          <div className="modal-content" style={{ maxWidth: '400px' }}>
+            <div className="editor-header" style={{ marginBottom: '1.5rem' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Crear Nuevo Proyecto</h2>
+              <button className="icon-button" onClick={() => setShowNewFolderModal(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+              <label>Nombre del Proyecto</label>
+              <input 
+                type="text" 
+                value={newFolderName} 
+                onChange={(e) => setNewFolderName(e.target.value)} 
+                placeholder="Ej: Relevamiento Chaco"
+                autoFocus
+              />
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+              <label>Vincular a Mapa Base (Opcional)</label>
+              <select 
+                value={newFolderLinkedMapId} 
+                onChange={(e) => setNewFolderLinkedMapId(e.target.value === 'none' ? 'none' : Number(e.target.value))}
+                className="select-input"
+                style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)', background: 'var(--surface)', color: 'var(--text-primary)' }}
+              >
+                <option value="none">Ninguno (Visible siempre)</option>
+                {customLayers.map(l => (
+                  <option key={l.id} value={l.id}>{l.name} ({l.type === 'tiff' ? 'GeoTIFF' : 'XYZ'})</option>
+                ))}
+              </select>
+              <p style={{ fontSize: '0.7rem', marginTop: '0.5rem', opacity: 0.7 }}>
+                El proyecto se activará automáticamente al cargar este mapa.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <button 
+                className="btn btn-secondary" 
+                style={{ flex: 1 }}
+                onClick={() => setShowNewFolderModal(false)}
+              >
+                Cancelar
+              </button>
+              <button 
+                className="btn btn-primary" 
+                style={{ flex: 2 }}
+                onClick={handleCreateFolder}
+                disabled={!newFolderName}
+              >
+                Crear Proyecto
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

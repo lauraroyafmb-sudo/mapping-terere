@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -9,40 +9,58 @@ import { getIconComponent } from '../utils/iconMap';
 interface MapViewerProps {
   onMapClick?: (e: any) => void;
   onEditFeature?: (feature: any) => void;
+  onDrawingUpdate?: (coords: any[]) => void;
+  onFeatureUpdate?: (feature: any) => void;
   points?: any[];
   firePoints?: any[];
   showFires?: boolean;
   track?: any[];
   geometries?: any[];
   currentDrawing?: any[];
-  drawMode?: 'none' | 'line' | 'polygon';
+  editingFeature?: any | null;
+  drawMode?: 'none' | 'point' | 'line' | 'polygon';
   centerTo?: { lat: number, lon: number, timestamp: number } | null;
   mapStyle?: string | object;
   customLayers?: any[];
+  userLocation?: { lat: number, lon: number, accuracy: number } | null;
 }
 
-const MapViewer: React.FC<MapViewerProps> = ({ 
+const MapViewer = forwardRef(({ 
   onMapClick, 
   onEditFeature,
+  onDrawingUpdate,
+  onFeatureUpdate,
   points = [], 
   firePoints = [],
   showFires = false,
   track = [], 
   geometries = [], 
   currentDrawing = [],
+  editingFeature = null,
   drawMode = 'none',
   centerTo = null,
   mapStyle = 'https://demotiles.maplibre.org/style.json',
-  customLayers = []
-}) => {
+  customLayers = [],
+  userLocation = null
+}: MapViewerProps, ref) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
+  const vertexMarkers = useRef<maplibregl.Marker[]>([]);
   const roots = useRef<Root[]>([]);
   const userLocationMarker = useRef<maplibregl.Marker | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [styleLoadedTs, setStyleLoadedTs] = useState(0);
   
+  useImperativeHandle(ref, () => ({
+    getCenter: () => {
+      if (map.current) {
+        const center = map.current.getCenter();
+        return { lat: center.lat, lon: center.lng };
+      }
+      return { lat: -25.3000, lon: -57.6333 };
+    }
+  }));
   // Refs para evitar clausuras obsoletas en los listeners de eventos
   const geometriesRef = useRef(geometries);
   const pointsRef = useRef(points);
@@ -463,35 +481,107 @@ const MapViewer: React.FC<MapViewerProps> = ({
     };
   }, [isReady]);
 
-  // Center to user location effect
+  // Fly to location when centerTo changes (manual centering)
   useEffect(() => {
     if (!map.current || !isReady || !centerTo) return;
     
     map.current.flyTo({
       center: [centerTo.lon, centerTo.lat],
-      zoom: 15,
-      duration: 2000,
+      zoom: 17, // Zoom más cercano para navegación
+      duration: 1500,
       essential: true
     });
+  }, [centerTo, isReady]);
+
+  // Update user location marker whenever userLocation changes
+  useEffect(() => {
+    if (!map.current || !isReady || !userLocation) {
+      if (userLocationMarker.current) {
+        userLocationMarker.current.remove();
+        userLocationMarker.current = null;
+      }
+      return;
+    }
 
     if (!userLocationMarker.current) {
       const el = document.createElement('div');
-      el.style.width = '16px';
-      el.style.height = '16px';
+      el.className = 'user-location-marker';
+      el.style.width = '20px';
+      el.style.height = '20px';
       el.style.backgroundColor = '#3B82F6';
       el.style.border = '3px solid white';
       el.style.borderRadius = '50%';
-      el.style.boxShadow = '0 0 10px rgba(59, 130, 246, 0.5)';
+      el.style.boxShadow = '0 0 15px rgba(59, 130, 246, 0.8)';
+      el.style.zIndex = '100';
       
       userLocationMarker.current = new maplibregl.Marker({ element: el })
-        .setLngLat([centerTo.lon, centerTo.lat])
+        .setLngLat([userLocation.lon, userLocation.lat])
         .addTo(map.current);
     } else {
-      userLocationMarker.current.setLngLat([centerTo.lon, centerTo.lat]);
+      userLocationMarker.current.setLngLat([userLocation.lon, userLocation.lat]);
     }
-  }, [centerTo, isReady]);
+  }, [userLocation, isReady]);
+
+  // Gestión de Vértices Editables (Markers arrastrables)
+  useEffect(() => {
+    if (!map.current || !isReady) return;
+
+    // Limpiar marcadores previos
+    vertexMarkers.current.forEach(m => m.remove());
+    vertexMarkers.current = [];
+
+    const isDrawing = drawMode !== 'none' && drawMode !== 'point' && currentDrawing.length > 0;
+    const isEditing = editingFeature && (editingFeature.type === 'line' || editingFeature.type === 'polygon');
+
+    if (!isDrawing && !isEditing) return;
+
+    const coords = isDrawing ? currentDrawing : editingFeature.coordinates;
+    const color = isDrawing ? (drawMode === 'polygon' ? COLORS.polygon : COLORS.line) : (editingFeature.type === 'polygon' ? COLORS.polygon : COLORS.line);
+
+    coords.forEach((p: any, index: number) => {
+      const el = document.createElement('div');
+      el.className = 'vertex-marker';
+      el.style.width = '14px';
+      el.style.height = '14px';
+      el.style.backgroundColor = 'white';
+      el.style.border = `3px solid ${color}`;
+      el.style.borderRadius = '50%';
+      el.style.cursor = 'move';
+      el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+
+      const marker = new maplibregl.Marker({ element: el, draggable: true })
+        .setLngLat([p.lon, p.lat])
+        .addTo(map.current!);
+
+      marker.on('dragend', () => {
+        const lngLat = marker.getLngLat();
+        const newCoords = [...coords];
+        newCoords[index] = { ...newCoords[index], lat: lngLat.lat, lon: lngLat.lng };
+
+        if (isDrawing && onDrawingUpdate) {
+          onDrawingUpdate(newCoords);
+        } else if (isEditing && onFeatureUpdate) {
+          onFeatureUpdate({ ...editingFeature, coordinates: newCoords });
+        }
+      });
+
+      marker.getElement().addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Eliminar vértice
+        const newCoords = coords.filter((_: any, i: number) => i !== index);
+        
+        if (isDrawing && onDrawingUpdate) {
+          onDrawingUpdate(newCoords);
+        } else if (isEditing && onFeatureUpdate) {
+          onFeatureUpdate({ ...editingFeature, coordinates: newCoords });
+        }
+      });
+
+      vertexMarkers.current.push(marker);
+    });
+  }, [currentDrawing, editingFeature, drawMode, isReady, onDrawingUpdate, onFeatureUpdate]);
 
   return <div id="map" ref={mapContainer} style={{ width: '100%', height: '100%' }} />;
-};
+});
 
 export default MapViewer;

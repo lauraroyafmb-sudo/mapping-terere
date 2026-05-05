@@ -20,14 +20,16 @@ export default defineConfig({
         display: 'standalone',
         icons: [
           {
-            src: 'icon-192x192.png',
+            src: 'logo-terere.png',
             sizes: '192x192',
-            type: 'image/png'
+            type: 'image/png',
+            purpose: 'any maskable'
           },
           {
-            src: 'icon-512x512.png',
+            src: 'logo-terere.png',
             sizes: '512x512',
-            type: 'image/png'
+            type: 'image/png',
+            purpose: 'any maskable'
           }
         ]
       }
