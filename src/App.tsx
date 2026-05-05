@@ -518,11 +518,7 @@ function App() {
           }]);
           setCenterTo({ ...result.center, timestamp: Date.now() });
         } catch (error: any) {
-          if (error.message === "PROJECTION_ERROR") {
-            alert('Tu mapa está usando coordenadas proyectadas (probablemente UTM) y esto hace que la aplicación falle. Por favor, abre tu archivo en QGIS, expórtalo cambiando el SRC a "WGS 84 (EPSG:4326)" y vuelve a subirlo.');
-          } else {
-            alert('Error al leer el GeoTIFF. Asegúrate de que no esté corrupto. Detalle: ' + error.message);
-          }
+          alert('Error al leer el GeoTIFF. Asegúrate de que la proyección sea WGS84 o UTM (Zonas 20/21). Detalle: ' + error.message);
         }
       } else if (isVector) {
         try {

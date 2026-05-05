@@ -65,7 +65,7 @@ export const GeoService = {
 
   /**
    * Lee un archivo GeoTIFF local y extrae la imagen y coordenadas.
-   * Asume que el GeoTIFF está en proyección EPSG:4326 (Lat/Lon).
+   * Soporta proyección WGS84 y UTM (Zonas 20S y 21S).
    */
   async parseGeoTIFF(file: File) {
     try {
@@ -73,10 +73,46 @@ export const GeoService = {
       const tiff = await GeoTIFF.fromBlob(file);
       const image = await tiff.getImage();
       const bbox = image.getBoundingBox(); 
-      // bbox is [minX, minY, maxX, maxY]
-      
       const width = image.getWidth();
       const height = image.getHeight();
+      
+      // Intentar obtener información de la proyección
+      const gdalMetadata = image.getGDALMetadata();
+      const geoKeys = image.getGeoKeys();
+      
+      let [minX, minY, maxX, maxY] = bbox;
+      
+      // Si las coordenadas son muy grandes, probablemente es UTM
+      if (Math.abs(minX) > 180 || Math.abs(maxX) > 180 || Math.abs(minY) > 90 || Math.abs(maxY) > 90) {
+        let utmProj = '';
+        
+        // Intentar detectar la zona UTM desde los GeoKeys
+        // ProjectedCSTypeGeoKey = 3072
+        if (geoKeys && geoKeys.ProjectedCSTypeGeoKey) {
+          const epsg = geoKeys.ProjectedCSTypeGeoKey;
+          if (epsg === 32721) utmProj = '+proj=utm +zone=21 +south +datum=WGS84 +units=m +no_defs';
+          else if (epsg === 32720) utmProj = '+proj=utm +zone=20 +south +datum=WGS84 +units=m +no_defs';
+          else if (epsg === 32621) utmProj = '+proj=utm +zone=21 +north +datum=WGS84 +units=m +no_defs';
+          else if (epsg === 32620) utmProj = '+proj=utm +zone=20 +north +datum=WGS84 +units=m +no_defs';
+        }
+        
+        // Si no se detectó pero estamos en el rango de Paraguay, intentar 21S por defecto
+        if (!utmProj) {
+          utmProj = '+proj=utm +zone=21 +south +datum=WGS84 +units=m +no_defs';
+        }
+
+        try {
+          const [lonMin, latMin] = proj4(utmProj, 'WGS84', [minX, minY]);
+          const [lonMax, latMax] = proj4(utmProj, 'WGS84', [maxX, maxY]);
+          minX = lonMin;
+          minY = latMin;
+          maxX = lonMax;
+          maxY = latMax;
+        } catch (e) {
+          throw new Error("PROJECTION_ERROR");
+        }
+      }
+
       const rasters = await image.readRasters() as any[];
       
       const canvas = document.createElement('canvas');
@@ -90,20 +126,20 @@ export const GeoService = {
       
       let o = 0;
       for (let i = 0; i < rasters[0].length; i++) {
-        data[o] = rasters[0][i];     // R
-        data[o+1] = rasters[1] ? rasters[1][i] : rasters[0][i]; // G
-        data[o+2] = rasters[2] ? rasters[2][i] : rasters[0][i]; // B
-        data[o+3] = rasters[3] ? rasters[3][i] : 255; // A
+        // Soporte básico para 1 banda (Grises) o 3/4 bandas (RGB/A)
+        const r = rasters[0][i];
+        const g = rasters[1] ? rasters[1][i] : r;
+        const b = rasters[2] ? rasters[2][i] : r;
+        const a = rasters[3] ? rasters[3][i] : 255;
+        
+        data[o] = r;
+        data[o+1] = g;
+        data[o+2] = b;
+        data[o+3] = a;
         o += 4;
       }
       ctx.putImageData(imageData, 0, 0);
       
-      // Validar si las coordenadas están en formato Lat/Lon (EPSG:4326)
-      const [minX, minY, maxX, maxY] = bbox;
-      if (Math.abs(minX) > 180 || Math.abs(maxX) > 180 || Math.abs(minY) > 90 || Math.abs(maxY) > 90) {
-        throw new Error("PROJECTION_ERROR");
-      }
-
       const dataUrl = await new Promise<string>((resolve, reject) => {
         canvas.toBlob(blob => {
           if (blob) resolve(URL.createObjectURL(blob));
