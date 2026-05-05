@@ -77,7 +77,6 @@ export const GeoService = {
       const height = image.getHeight();
       
       // Intentar obtener información de la proyección
-      const gdalMetadata = image.getGDALMetadata();
       const geoKeys = image.getGeoKeys();
       
       let [minX, minY, maxX, maxY] = bbox;
