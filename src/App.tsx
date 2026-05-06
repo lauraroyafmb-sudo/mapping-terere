@@ -405,21 +405,8 @@ function App() {
       setDrawMode('none');
     } else if (drawMode !== 'none') {
       setCurrentDrawing(prev => [...prev, { lat: lngLat.lat, lon: lngLat.lng }]);
-    } else {
-      // Por defecto, clic en el mapa también puede crear un punto o podemos dejarlo solo para los modos
-      setEditingFeature({
-        id: Date.now(),
-        type: 'point',
-        lat: lngLat.lat,
-        lon: lngLat.lng,
-        name: `Punto ${points.length + 1}`,
-        description: '',
-        icon: 'default',
-        attributes: [],
-        photos: [],
-        folderId: activeFolderId
-      });
     }
+    // Si drawMode es 'none', no hacemos nada (solo seleccionar está permitido, lo cual maneja MapViewer)
   };
 
   const finishDrawing = () => {
