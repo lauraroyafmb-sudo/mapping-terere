@@ -511,7 +511,7 @@ function App() {
         try {
           const result = await GeoService.importVectorFile(file);
           if (result.points.length === 0 && result.geometries.length === 0) {
-            alert("No se encontraron geometrías válidas en el archivo.");
+            alert(`No se encontraron geometrías válidas en el archivo. Debug: ${result.debugInfo}`);
             return;
           }
           setPoints(prev => [...prev, ...result.points]);

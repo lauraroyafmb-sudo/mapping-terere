@@ -316,6 +316,9 @@ export const GeoService = {
     else if (ext === 'kml') {
       const text = await file.text();
       const dom = new DOMParser().parseFromString(text, 'text/xml');
+      if (dom.getElementsByTagName('parsererror').length > 0) {
+        throw new Error("El archivo KML contiene errores de sintaxis XML. Puede estar corrupto o mal exportado.");
+      }
       geojson = kml(dom);
     }
     else if (ext === 'kmz') {
@@ -325,6 +328,9 @@ export const GeoService = {
         if (!kmlFile) throw new Error("No se encontró ningún archivo KML dentro del KMZ");
         const text = await kmlFile.async("string");
         const dom = new DOMParser().parseFromString(text, 'text/xml');
+        if (dom.getElementsByTagName('parsererror').length > 0) {
+          throw new Error("El archivo KML dentro del KMZ contiene errores de sintaxis XML.");
+        }
         geojson = kml(dom);
       } catch (e: any) {
         if (e.message.includes("No se encontró")) throw e;
@@ -412,13 +418,18 @@ export const GeoService = {
       }
     };
 
+    let debugInfo = "N/A";
+    if (geojson) {
+      debugInfo = `Type: ${geojson.type}, Features: ${geojson.features ? geojson.features.length : 'none'}`;
+    }
+
     if (geojson.type === 'FeatureCollection') {
       geojson.features.forEach(processFeature);
     } else if (geojson.type === 'Feature') {
       processFeature(geojson);
     }
 
-    return { points, geometries };
+    return { points, geometries, debugInfo };
   }
 };
 
