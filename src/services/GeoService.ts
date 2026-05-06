@@ -314,10 +314,21 @@ export const GeoService = {
       geojson = JSON.parse(text);
     } 
     else if (ext === 'kml') {
-      const text = await file.text();
-      const dom = new DOMParser().parseFromString(text, 'text/xml');
+      let cleanText = await file.text();
+      // Remover BOM
+      if (cleanText.charCodeAt(0) === 0xFEFF) cleanText = cleanText.slice(1);
+      
+      if (cleanText.trim().startsWith('PK')) {
+        throw new Error("El archivo es un ZIP/KMZ pero tiene extensión .kml. Renómbralo a .kmz y vuelve a importar.");
+      }
+
+      // Sanitización básica de XML
+      cleanText = cleanText.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+      cleanText = cleanText.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#x?\d+;)/g, '&amp;');
+
+      const dom = new DOMParser().parseFromString(cleanText, 'text/xml');
       if (dom.getElementsByTagName('parsererror').length > 0) {
-        throw new Error("El archivo KML contiene errores de sintaxis XML. Puede estar corrupto o mal exportado.");
+        throw new Error("El archivo KML contiene errores de sintaxis XML (posiblemente caracteres inválidos o etiquetas sin cerrar).");
       }
       geojson = kml(dom);
     }
@@ -326,8 +337,12 @@ export const GeoService = {
         const zip = await JSZip.loadAsync(file);
         const kmlFile = Object.values(zip.files).find((f: any) => f.name.toLowerCase().endsWith('.kml'));
         if (!kmlFile) throw new Error("No se encontró ningún archivo KML dentro del KMZ");
-        const text = await kmlFile.async("string");
-        const dom = new DOMParser().parseFromString(text, 'text/xml');
+        let cleanText = await kmlFile.async("string");
+        if (cleanText.charCodeAt(0) === 0xFEFF) cleanText = cleanText.slice(1);
+        cleanText = cleanText.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+        cleanText = cleanText.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#x?\d+;)/g, '&amp;');
+
+        const dom = new DOMParser().parseFromString(cleanText, 'text/xml');
         if (dom.getElementsByTagName('parsererror').length > 0) {
           throw new Error("El archivo KML dentro del KMZ contiene errores de sintaxis XML.");
         }
