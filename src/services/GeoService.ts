@@ -141,7 +141,12 @@ export const GeoService = {
       
       const dataUrl = await new Promise<string>((resolve, reject) => {
         canvas.toBlob(blob => {
-          if (blob) resolve(URL.createObjectURL(blob));
+          if (blob) {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error("Error al convertir la imagen a Base64"));
+            reader.readAsDataURL(blob);
+          }
           else reject(new Error("No se pudo crear la imagen del mapa"));
         }, 'image/png');
       });
@@ -333,8 +338,20 @@ export const GeoService = {
     const geometries: any[] = [];
 
     const processFeature = (feature: any) => {
-      const type = feature.geometry?.type;
-      const coords = feature.geometry?.coordinates;
+      if (!feature.geometry) return;
+      const type = feature.geometry.type;
+
+      if (type === 'GeometryCollection' && feature.geometry.geometries) {
+        feature.geometry.geometries.forEach((geom: any) => {
+          processFeature({
+            ...feature,
+            geometry: geom
+          });
+        });
+        return;
+      }
+
+      const coords = feature.geometry.coordinates;
       if (!type || !coords) return;
 
       const props = feature.properties || {};
